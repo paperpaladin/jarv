@@ -1,0 +1,5 @@
+#!/bin/sh
+# jarv launcher. The build lives in build/; nothing is packaged into a jar,
+# which would be a pleasing recursion and an extra thing to go stale.
+here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+exec java -cp "$here/build" jarv.Main "$@"

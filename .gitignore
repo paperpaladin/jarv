@@ -1,0 +1,8 @@
+build/
+*.class
+scratch/
+t/tmp*/
+*.jar
+*.jks
+*.p12
+*.keystore
