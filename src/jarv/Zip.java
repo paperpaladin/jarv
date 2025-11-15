@@ -1,5 +1,8 @@
 package jarv;
 
+import java.util.ArrayList;
+import java.util.List;
+
 /**
  * The zip container, parsed by hand.
  *
@@ -32,9 +35,18 @@ public final class Zip {
 	long cdOff;
 	int commentLen;
 
+	private final List<Entry> entries = new ArrayList<Entry>();
+
 	public Zip(byte[] file) {
 		this.file = file;
 		findEocd();
+		if (!bad()) {
+			readCentral();
+		}
+	}
+
+	public List<Entry> entries() {
+		return entries;
 	}
 
 	public boolean bad() {
@@ -106,5 +118,64 @@ public final class Zip {
 		}
 		fail("no end of central directory record in the last "
 			+ (file.length - stop) + " bytes");
+	}
+
+	/**
+	 * Walk the central directory.
+	 *
+	 * The count in the end record is advice, not a boundary: the loop reads
+	 * until the declared size is consumed and then compares what it found
+	 * with what was promised. A central directory that declares ten entries
+	 * and holds eleven is a real container attack, so the mismatch is kept
+	 * rather than hidden by trusting one of the two numbers.
+	 */
+	private void readCentral() {
+		if (cdOff > file.length || cdSize > file.length - cdOff) {
+			fail("central directory at " + cdOff + " size " + cdSize
+				+ " does not fit in " + file.length + " bytes");
+			return;
+		}
+		Buf b = new Buf(file, (int) cdOff, (int) cdSize);
+		while (b.remaining() >= 4) {
+			long sig = b.u32();
+			if (sig != SIG_CEN) {
+				fail("central directory entry " + entries.size() + " at "
+					+ b.pos() + " has signature " + hex32(sig));
+				return;
+			}
+			Entry e = new Entry();
+			e.versionMade = b.u16();
+			e.versionNeeded = b.u16();
+			e.flags = b.u16();
+			e.method = b.u16();
+			e.modTime = b.u16();
+			e.modDate = b.u16();
+			e.crc = b.u32();
+			e.compSize = b.u32();
+			e.uncompSize = b.u32();
+			int nlen = b.u16();
+			int elen = b.u16();
+			int clen = b.u16();
+			e.diskStart = b.u16();
+			e.internalAttrs = b.u16();
+			e.externalAttrs = b.u32();
+			e.localOff = b.u32();
+			e.nameBytes = b.bytes(nlen);
+			e.extra = b.bytes(elen);
+			e.comment = b.bytes(clen);
+			if (b.bad()) {
+				fail("central directory entry " + entries.size() + ": " + b.error());
+				return;
+			}
+			e.decodeName();
+			entries.add(e);
+		}
+		if (b.remaining() != 0) {
+			fail("central directory has " + b.remaining() + " trailing bytes");
+		}
+	}
+
+	static String hex32(long v) {
+		return String.format("0x%08x", v);
 	}
 }
