@@ -32,6 +32,24 @@ done
 
 ok "toolchain present"
 
+# ------------------------------------------------------------- build the corpus
+"$here/corpus.sh" "$work" >/dev/null || { echo "corpus build failed"; exit 2; }
+jars=$(ls "$work"/*.jar | sort)
+njars=$(printf '%s\n' "$jars" | wc -l)
+echo "--- corpus: $njars jars in $work"
+[ "$njars" -ge 6 ] || { echo "corpus of $njars jars is too small"; exit 2; }
+
+# ------------------------------- oracle: Info-ZIP zipinfo -v and unzip -l
+echo "--- oracle: zipinfo -v, unzip -l (Info-ZIP, no JDK code)"
+out=$(python3 "$here/zipcmp.py" "$root/jarv" $jars)
+printf '%s\n' "$out" | grep -v '^ZIPCMP_' | grep '^FAIL' || true
+p=$(printf '%s\n' "$out" | sed -n 's/^ZIPCMP_PASS //p')
+f=$(printf '%s\n' "$out" | sed -n 's/^ZIPCMP_FAIL //p')
+[ -n "$p" ] || { echo "zipcmp.py produced no count"; exit 2; }
+echo "ok   container: $p facts agree with Info-ZIP, $f disagree"
+pass=$((pass + p))
+fail=$((fail + f))
+
 echo
 echo "$pass passed, $fail failed"
 [ "$fail" -eq 0 ]
