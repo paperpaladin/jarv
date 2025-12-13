@@ -43,6 +43,9 @@ public final class Zip {
 		if (!bad()) {
 			readCentral();
 		}
+		if (!bad()) {
+			readLocals();
+		}
 	}
 
 	public List<Entry> entries() {
@@ -168,11 +171,160 @@ public final class Zip {
 				return;
 			}
 			e.decodeName();
+			Zip64.applyCentral(e);
 			entries.add(e);
 		}
 		if (b.remaining() != 0) {
 			fail("central directory has " + b.remaining() + " trailing bytes");
 		}
+	}
+
+	/**
+	 * Read the local header of every entry and fill in dataOff.
+	 *
+	 * The local header repeats the name, the method and the sizes. The two
+	 * copies are allowed to differ in exactly one way: when general purpose
+	 * bit 3 is set the local copy of the CRC and both sizes is zero and the
+	 * real values follow the data in a descriptor. Any other difference is
+	 * recorded, because a reader that takes the name from one copy and the
+	 * data from the other can be made to extract a different file from the
+	 * one it reported.
+	 */
+	public void readLocals() {
+		for (Entry e : entries) {
+			readLocal(e);
+			if (bad()) {
+				return;
+			}
+		}
+	}
+
+	private void readLocal(Entry e) {
+		if (e.localOff < 0 || e.localOff > file.length - 30) {
+			fail(e.name + ": local header at " + e.localOff
+				+ " is outside the file");
+			return;
+		}
+		Buf b = new Buf(file, (int) e.localOff, file.length - (int) e.localOff);
+		long sig = b.u32();
+		if (sig != SIG_LOC) {
+			fail(e.name + ": local header signature " + hex32(sig));
+			return;
+		}
+		b.u16();
+		e.localFlags = b.u16();
+		e.localMethod = b.u16();
+		b.u16();
+		b.u16();
+		e.localCrc = b.u32();
+		e.localCompSize = b.u32();
+		e.localUncompSize = b.u32();
+		int nlen = b.u16();
+		int elen = b.u16();
+		e.localNameBytes = b.bytes(nlen);
+		byte[] lextra = b.bytes(elen);
+		if (b.bad()) {
+			fail(e.name + ": local header: " + b.error());
+			return;
+		}
+		e.dataOff = e.localOff + b.pos();
+		e.dataDescriptor = (e.localFlags & 0x0008) != 0;
+		Zip64.applyLocal(e, lextra);
+		if (e.compSize > file.length - e.dataOff) {
+			fail(e.name + ": " + e.compSize + " bytes of data at " + e.dataOff
+				+ " run past the end of the file");
+			return;
+		}
+		if (e.dataDescriptor) {
+			readDescriptor(e);
+		}
+	}
+
+	/**
+	 * The descriptor after a streamed entry.
+	 *
+	 * Its signature is optional: APPNOTE says a reader should accept the
+	 * four bytes 50 4b 07 08 and should also accept their absence, which
+	 * means the descriptor is found by trusting the compressed size from
+	 * the central directory and then checking what is there. The zip64 form
+	 * is eight bytes per size rather than four, and nothing in the
+	 * descriptor says which it is: the entry's zip64 flag decides.
+	 */
+	private void readDescriptor(Entry e) {
+		int off = (int) (e.dataOff + e.compSize);
+		if (off < 0 || off > file.length) {
+			fail(e.name + ": no room for a data descriptor at " + off);
+			return;
+		}
+		Buf b = new Buf(file, off, file.length - off);
+		long first = b.u32();
+		if (first == SIG_DD) {
+			e.ddSigned = true;
+		} else {
+			b.seek(0);
+		}
+		long crc = b.u32();
+		long cs;
+		long us;
+		if (e.zip64) {
+			cs = b.u64();
+			us = b.u64();
+		} else {
+			cs = b.u32();
+			us = b.u32();
+		}
+		if (b.bad()) {
+			fail(e.name + ": data descriptor: " + b.error());
+			return;
+		}
+		e.ddCrc = crc;
+		e.ddCompSize = cs;
+		e.ddUncompSize = us;
+		e.ddOff = off;
+		e.ddLen = b.pos();
+	}
+
+	/**
+	 * Every way the local header and the central directory can disagree,
+	 * as a list of one-line descriptions. Empty means they agree.
+	 */
+	public java.util.List<String> localMismatches(Entry e) {
+		java.util.List<String> out = new ArrayList<String>();
+		if (!java.util.Arrays.equals(e.nameBytes, e.localNameBytes)) {
+			out.add("name differs: central " + e.name + ", local "
+				+ new String(e.localNameBytes, java.nio.charset.StandardCharsets.UTF_8));
+		}
+		if (e.localMethod != e.method) {
+			out.add("method differs: central " + e.method + ", local " + e.localMethod);
+		}
+		if (e.dataDescriptor) {
+			if (e.ddCrc != e.crc) {
+				out.add("descriptor crc " + hex32(e.ddCrc) + " against central "
+					+ hex32(e.crc));
+			}
+			if (e.ddCompSize != e.compSize) {
+				out.add("descriptor compressed size " + e.ddCompSize
+					+ " against central " + e.compSize);
+			}
+			if (e.ddUncompSize != e.uncompSize) {
+				out.add("descriptor uncompressed size " + e.ddUncompSize
+					+ " against central " + e.uncompSize);
+			}
+		} else {
+			if (e.localCrc != e.crc) {
+				out.add("local crc " + hex32(e.localCrc) + " against central "
+					+ hex32(e.crc));
+			}
+			if (e.localCompSize != e.compSize) {
+				out.add("local compressed size " + e.localCompSize
+					+ " against central " + e.compSize);
+			}
+			if (e.localUncompSize != e.uncompSize) {
+				out.add("local uncompressed size " + e.localUncompSize
+					+ " against central " + e.uncompSize);
+			}
+		}
+		return out;
 	}
 
 	static String hex32(long v) {

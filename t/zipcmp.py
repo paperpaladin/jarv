@@ -81,7 +81,7 @@ METHODS = {"none": 0, "stored": 0, "deflated": 8}
 
 
 def parse_jarv(text):
-    out = {"entries": []}
+    out = {"entries": [], "locbad": []}
     for line in text.splitlines():
         f = line.split()
         if not f:
@@ -106,6 +106,16 @@ def parse_jarv(text):
                 "loff": int(d["loff"]),
                 "extra": int(d["extra"]),
             })
+        elif f[0] == "loc":
+            d = dict(kv.split("=", 1) for kv in f[2:] if "=" in kv)
+            out["entries"][int(f[1])].update({
+                "dataoff": int(d["dataoff"]),
+                "dd": int(d["dd"]),
+                "zip64": int(d["zip64"]),
+                "mismatch": int(d["mismatch"]),
+            })
+        elif f[0] == "locbad":
+            out["locbad"].append(line)
     return out
 
 
@@ -159,6 +169,16 @@ def compare(tag, jar, jarv_bin):
         else:
             bad("%s %s.datadesc jarv=%s zipinfo=%s" % (tag, n, dd, b["dd"]))
 
+    # The local header repeats name, method and sizes. jar and jarsigner
+    # write them consistently, so on this corpus every mismatch list must be
+    # empty; the tampered cases later are where it is allowed not to be.
+    if not ours["locbad"]:
+        ok("%s local headers agree with the central directory (%d entries)"
+           % (tag, len(ours["entries"])))
+    else:
+        for l in ours["locbad"]:
+            bad("%s %s" % (tag, l))
+
     # unzip -l is a second opinion on names and uncompressed sizes only.
     rc, ut = run(["unzip", "-l", jar])
     if rc != 0:
@@ -186,11 +206,50 @@ def compare(tag, jar, jarv_bin):
                 % (tag, a["name"], a["usize"], name, size))
 
 
+def digests(tag, jar, jarv_bin):
+    """unzip -p extracts, sha256sum digests, jarv has to match both.
+
+    This is the check that dataOff is right. An offset off by one byte makes
+    the deflate stream malformed or the CRC wrong, and an offset that is off
+    by a whole header produces a different file, which the digest sees and
+    a size comparison would not.
+    """
+    rc, jt = run([jarv_bin, "--digest", jar])
+    ours = {}
+    order = []
+    for line in jt.splitlines():
+        f = line.split(" ", 3)
+        if len(f) == 4 and f[0] == "sha256":
+            ours[f[3]] = (f[1], int(f[2]))
+            order.append(f[3])
+        elif f and f[0] == "nodata":
+            bad("%s digest %s: jarv could not read it: %s"
+                % (tag, f[1], " ".join(f[2:])))
+    for name in order:
+        if name.endswith("/"):
+            continue
+        p1 = subprocess.Popen(["unzip", "-p", jar, name], stdout=subprocess.PIPE,
+                              stderr=subprocess.DEVNULL)
+        p2 = subprocess.Popen(["sha256sum"], stdin=p1.stdout,
+                              stdout=subprocess.PIPE)
+        p1.stdout.close()
+        out = p2.communicate()[0].decode()
+        p1.wait()
+        want = out.split()[0] if out else "?"
+        got, size = ours[name]
+        if want == got:
+            ok("%s digest %s %s" % (tag, name, got[:16]))
+        else:
+            bad("%s digest %s jarv=%s unzip+sha256sum=%s"
+                % (tag, name, got, want))
+
+
 def main():
     jarv_bin = sys.argv[1]
     for jar in sys.argv[2:]:
         tag = jar.rsplit("/", 1)[-1]
         compare(tag, jar, jarv_bin)
+        digests(tag, jar, jarv_bin)
     print("ZIPCMP_PASS %d" % PASS)
     print("ZIPCMP_FAIL %d" % FAIL)
 

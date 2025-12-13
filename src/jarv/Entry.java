@@ -39,6 +39,14 @@ public final class Entry {
 	public int localMethod = -1;
 	public byte[] localNameBytes = new byte[0];
 
+	/** Data descriptor, present when general purpose bit 3 is set. */
+	public boolean ddSigned;
+	public long ddCrc = -1;
+	public long ddCompSize = -1;
+	public long ddUncompSize = -1;
+	public long ddOff = -1;
+	public int ddLen;
+
 	public boolean utf8Name() {
 		return (flags & 0x0800) != 0;
 	}

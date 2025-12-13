@@ -67,12 +67,43 @@ public final class Main {
 		for (String m : modes) {
 			if (m.equals("zip")) {
 				dumpZip(z, out);
+			} else if (m.equals("digest")) {
+				if (!dumpDigests(z, out)) {
+					return EX_REFUSED;
+				}
 			} else {
 				System.err.println("jarv: --" + m + " is not implemented yet");
 				return EX_REFUSED;
 			}
 		}
 		return EX_OK;
+	}
+
+	/** sha256 of every entry's uncompressed bytes, for the oracle to check. */
+	static boolean dumpDigests(Zip z, PrintStream out) {
+		java.security.MessageDigest md;
+		try {
+			md = java.security.MessageDigest.getInstance("SHA-256");
+		} catch (java.security.NoSuchAlgorithmException e) {
+			System.err.println("jarv: no SHA-256: " + e.getMessage());
+			return false;
+		}
+		for (Entry e : z.entries()) {
+			byte[] b;
+			try {
+				b = Data.read(z, e);
+			} catch (Data.BadData bad) {
+				// One line per entry, and keep going. A reader that stops at
+				// the first unreadable member turns eight disagreements into
+				// one, and a single comparison over a whole archive is a
+				// weaker instrument than one per entry.
+				out.printf("nodata %s %s%n", e.name, bad.getMessage());
+				continue;
+			}
+			md.reset();
+			out.printf("sha256 %s %d %s%n", Hex.of(md.digest(b)), b.length, e.name);
+		}
+		return true;
 	}
 
 	static void dumpZip(Zip z, PrintStream out) {
@@ -84,6 +115,14 @@ public final class Main {
 					+ " loff=%d extra=%d utf8=%d name=%s%n",
 				i, e.flags, e.method, e.crc, e.compSize, e.uncompSize,
 				e.localOff, e.extra.length, e.utf8Name() ? 1 : 0, e.name);
+			out.printf("loc %d dataoff=%d dd=%d ddsig=%d zip64=%d lmethod=%d"
+					+ " lcsize=%d lusize=%d lcrc=%08x mismatch=%d%n",
+				i, e.dataOff, e.dataDescriptor ? 1 : 0, e.ddSigned ? 1 : 0,
+				e.zip64 ? 1 : 0, e.localMethod, e.localCompSize, e.localUncompSize,
+				e.localCrc, z.localMismatches(e).size());
+			for (String s : z.localMismatches(e)) {
+				out.printf("locbad %d %s%n", i, s);
+			}
 			i++;
 		}
 	}
