@@ -107,14 +107,17 @@ public final class Main {
 	}
 
 	static void dumpZip(Zip z, PrintStream out) {
-		out.printf("eocd off=%d entries=%d cdoff=%d cdsize=%d comment=%d%n",
-			z.eocdOff, z.cdCount, z.cdOff, z.cdSize, z.commentLen);
+		out.printf("eocd off=%d entries=%d cdoff=%d cdsize=%d comment=%d"
+				+ " zip64=%d z64off=%d%n",
+			z.eocdOff, z.cdCount, z.cdOff, z.cdSize, z.commentLen,
+			z.zip64Eocd ? 1 : 0, z.z64Off);
 		int i = 0;
 		for (Entry e : z.entries()) {
 			out.printf("cen %d flags=0x%04x method=%d crc=%08x csize=%d usize=%d"
-					+ " loff=%d extra=%d utf8=%d name=%s%n",
+					+ " loff=%d extra=%d utf8=%d namehex=%s name=%s%n",
 				i, e.flags, e.method, e.crc, e.compSize, e.uncompSize,
-				e.localOff, e.extra.length, e.utf8Name() ? 1 : 0, e.name);
+				e.localOff, e.extra.length, e.utf8Name() ? 1 : 0,
+				Hex.of(e.nameBytes), e.name);
 			out.printf("loc %d dataoff=%d dd=%d ddsig=%d zip64=%d lmethod=%d"
 					+ " lcsize=%d lusize=%d lcrc=%08x mismatch=%d%n",
 				i, e.dataOff, e.dataDescriptor ? 1 : 0, e.ddSigned ? 1 : 0,

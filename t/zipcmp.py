@@ -92,10 +92,13 @@ def parse_jarv(text):
             out["count"] = int(d["entries"])
             out["cdoff"] = int(d["cdoff"])
             out["cdsize"] = int(d["cdsize"])
+            out["zip64"] = int(d["zip64"])
+            out["z64off"] = int(d["z64off"])
         elif f[0] == "cen":
             d = dict(kv.split("=", 1) for kv in f[2:] if "=" in kv)
             # name may contain spaces; it is last and introduced by name=
             name = line.split(" name=", 1)[1]
+            d.pop("name", None)
             out["entries"].append({
                 "name": name,
                 "flags": int(d["flags"], 16),
@@ -105,6 +108,7 @@ def parse_jarv(text):
                 "usize": int(d["usize"]),
                 "loff": int(d["loff"]),
                 "extra": int(d["extra"]),
+                "namehex": d["namehex"],
             })
         elif f[0] == "loc":
             d = dict(kv.split("=", 1) for kv in f[2:] if "=" in kv)
@@ -131,6 +135,12 @@ def compare(tag, jar, jarv_bin):
     ours = parse_jarv(jt)
     theirs = parse_zipinfo(zt)
 
+    # On a zip64 archive Info-ZIP reports the zip64 end record's offset
+    # under "Actual end-cent-dir record offset", not the 32-bit record's.
+    # Measured on the corpus: three archives disagreed by exactly the
+    # 20-byte locator plus the 56-byte zip64 record.
+    if ours.get("zip64"):
+        ours = dict(ours, eocd=ours["z64off"])
     for key in ("eocd", "count", "cdoff", "cdsize"):
         a, b = ours.get(key), theirs.get(key)
         if b is None:
@@ -145,10 +155,19 @@ def compare(tag, jar, jarv_bin):
             % (tag, len(ours["entries"]), len(theirs["entries"])))
         return
     for a, b in zip(ours["entries"], theirs["entries"]):
-        if a["name"] != b["name"]:
+        n = a["name"]
+        ascii_name = all(ord(ch) < 128 for ch in n)
+        if ascii_name and a["name"] != b["name"]:
             bad("%s name jarv=%r zipinfo=%r" % (tag, a["name"], b["name"]))
             continue
-        n = a["name"]
+        if not ascii_name:
+            # This build of Info-ZIP has no UNICODE_SUPPORT (unzip -v lists
+            # the compilation options and it is not among them), so it
+            # cannot print a UTF-8 entry name and prints mojibake instead.
+            # The name bytes are compared against python3's zipfile below,
+            # which is a third independent reader; the rest of this entry's
+            # facts are compared here as usual, keyed by position.
+            n = "entry#%d" % theirs["entries"].index(b)
         for key in ("loff", "crc", "csize", "usize", "extra"):
             if a[key] == b[key]:
                 ok("%s %s.%s %s" % (tag, n, key, a[key]))
@@ -179,6 +198,27 @@ def compare(tag, jar, jarv_bin):
         for l in ours["locbad"]:
             bad("%s %s" % (tag, l))
 
+    # python3's zipfile, on the name bytes, because Info-ZIP cannot show
+    # them here. A third reader, written by neither Oracle nor Info-ZIP.
+    import zipfile
+    try:
+        with zipfile.ZipFile(jar) as zf:
+            theirnames = [i.orig_filename.encode("utf-8") for i in zf.infolist()]
+    except Exception as ex:
+        bad("%s python zipfile refused the archive: %s" % (tag, ex))
+        theirnames = None
+    if theirnames is not None:
+        if len(theirnames) != len(ours["entries"]):
+            bad("%s python zipfile listed %d entries, jarv %d"
+                % (tag, len(theirnames), len(ours["entries"])))
+        else:
+            for nb, a in zip(theirnames, ours["entries"]):
+                if nb.hex() == a["namehex"]:
+                    ok("%s namebytes %s" % (tag, a["namehex"][:24]))
+                else:
+                    bad("%s namebytes jarv=%s zipfile=%s"
+                        % (tag, a["namehex"], nb.hex()))
+
     # unzip -l is a second opinion on names and uncompressed sizes only.
     rc, ut = run(["unzip", "-l", jar])
     if rc != 0:
@@ -199,6 +239,8 @@ def compare(tag, jar, jarv_bin):
             % (tag, len(rows), len(ours["entries"])))
         return
     for (size, name), a in zip(rows, ours["entries"]):
+        if not all(ord(ch) < 128 for ch in a["name"]):
+            continue
         if name == a["name"] and size == a["usize"]:
             ok("%s unzip-l %s %d" % (tag, name, size))
         else:
@@ -225,8 +267,26 @@ def digests(tag, jar, jarv_bin):
         elif f and f[0] == "nodata":
             bad("%s digest %s: jarv could not read it: %s"
                 % (tag, f[1], " ".join(f[2:])))
+    import hashlib
+    import zipfile
+    try:
+        zf = zipfile.ZipFile(jar)
+    except Exception:
+        zf = None
     for name in order:
         if name.endswith("/"):
+            continue
+        if zf is not None:
+            try:
+                want = hashlib.sha256(zf.read(name)).hexdigest()
+            except Exception as ex:
+                want = "zipfile refused: %s" % ex
+            got, size = ours[name]
+            if want == got:
+                ok("%s pydigest %s %s" % (tag, name, got[:16]))
+            else:
+                bad("%s pydigest %s jarv=%s python=%s" % (tag, name, got, want))
+        if not all(ord(ch) < 128 for ch in name):
             continue
         p1 = subprocess.Popen(["unzip", "-p", jar, name], stdout=subprocess.PIPE,
                               stderr=subprocess.DEVNULL)

@@ -37,7 +37,7 @@ ok "toolchain present"
 jars=$(ls "$work"/*.jar | sort)
 njars=$(printf '%s\n' "$jars" | wc -l)
 echo "--- corpus: $njars jars in $work"
-[ "$njars" -ge 6 ] || { echo "corpus of $njars jars is too small"; exit 2; }
+[ "$njars" -ge 16 ] || { echo "corpus of $njars jars is too small"; exit 2; }
 
 # ------------------------------- oracle: Info-ZIP zipinfo -v and unzip -l
 echo "--- oracle: zipinfo -v, unzip -l (Info-ZIP, no JDK code)"

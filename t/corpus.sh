@@ -46,6 +46,28 @@ printf 'nested\n' > "$c/a/b/nested.txt"
 head -c 4096 /dev/urandom > "$c/a/blob.bin"
 : > "$c/empty.txt"
 
+# Names chosen to put a manifest "Name: " line on each side of the 72-byte
+# fold and exactly on it. "Name: " is six bytes, so a 66-byte name gives a
+# 72-byte line with no fold and a 67-byte name gives the first fold.
+for n in 62 65 66 67 68 72; do
+	nm=$(python3 -c "import sys; print('f' * (int(sys.argv[1]) - 4) + '.txt')" "$n")
+	printf 'len %s\n' "$n" > "$c/$nm"
+done
+
+# A name whose UTF-8 encoding is split by the fold in the middle of a
+# character. One ASCII byte then 22 three-byte characters is 67 bytes, so
+# the first line carries "Name: " plus 66 bytes of it and the break lands
+# after the second byte of the 22nd character. A reader that decodes each
+# physical line before joining them cannot put that name back together.
+python3 - "$c" <<'PYEOF'
+import sys, os
+d = sys.argv[1]
+name = "u" + "\u4e2d" * 22
+assert len(name.encode()) == 67, len(name.encode())
+open(os.path.join(d, name), "w").write("split\n")
+open(os.path.join(d, "\u00e9\u00e8.txt"), "w").write("accents\n")
+PYEOF
+
 mk() { (cd "$c" && jar cf "$w/$1.jar" .) ; }
 
 mk base
@@ -66,6 +88,31 @@ js "$w/expired.jar" old1 >/dev/null 2>&1
 cp "$w/base.jar" "$w/two-signers.jar"
 js -sigfile FIRST "$w/two-signers.jar" rsa1 >/dev/null
 js -sigfile SECOND "$w/two-signers.jar" rsa2 >/dev/null
+
+# ------------------------------------------- containers jarsigner cannot make
+# jarsigner rewrites the archive it signs with ZipOutputStream, so a signed
+# zip64 or stored-entry archive has to be built by rebuilding the container
+# afterwards. The signature covers entry contents and manifest bytes and
+# says nothing about the container, so a rebuild must leave it valid.
+M="python3 $(dirname "$0")/mkzip.py"
+$M rebuild "$w/good-rsa.jar" "$w/zip64.jar" --zip64 --no-dd
+$M rebuild "$w/good-rsa.jar" "$w/zip64-store.jar" --zip64 --store
+$M rebuild "$w/good-rsa.jar" "$w/stored.jar" --store
+$M rebuild "$w/good-rsa.jar" "$w/nodd.jar" --no-dd
+$M rebuild "$w/good-rsa.jar" "$w/comment.jar" --comment "a trailing comment, which the end record scan has to step over"
+# The JDK refuses this one outright: zip64 plus a data descriptor gives
+# "invalid entry size (expected 0 but got 582 bytes)" from java.util.zip
+# before jarsigner sees a signature at all. Kept in the corpus as a case
+# where the oracle refuses and jarv must be counted as unmatched rather
+# than as agreeing.
+$M rebuild "$w/good-rsa.jar" "$w/zip64-dd.jar" --zip64
+
+# ------------------------------------------------------- after-the-fact edits
+printf 'this entry was never in the manifest\n' \
+	| $M add "$w/good-rsa.jar" "$w/added.jar" smuggled.txt
+printf 'ALPHA\n' | $M replace "$w/good-rsa.jar" "$w/tampered.jar" alpha.txt
+$M bitflip "$w/good-rsa.jar" "$w/bitflip.jar" a/blob.bin 100
+$M drop "$w/good-rsa.jar" "$w/dropped.jar" beta.txt
 
 rm -f "$w/base.jar"
 echo "corpus in $w"

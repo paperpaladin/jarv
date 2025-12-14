@@ -37,9 +37,18 @@ public final class Zip {
 
 	private final List<Entry> entries = new ArrayList<Entry>();
 
+	/** Set when a zip64 end of central directory record was used. */
+	public boolean zip64Eocd;
+	/** Offset of the zip64 end record, or -1. */
+	public long z64Off = -1;
+	public long z64Total = -1;
+
 	public Zip(byte[] file) {
 		this.file = file;
 		findEocd();
+		if (!bad()) {
+			findZip64Eocd();
+		}
 		if (!bad()) {
 			readCentral();
 		}
@@ -121,6 +130,82 @@ public final class Zip {
 		}
 		fail("no end of central directory record in the last "
 			+ (file.length - stop) + " bytes");
+	}
+
+	/**
+	 * The zip64 end of central directory locator and record.
+	 *
+	 * The locator is a fixed 20 bytes immediately before the ordinary end
+	 * record, so unlike the end record it does not need scanning for. It
+	 * holds the offset of the zip64 end record, which carries 64-bit copies
+	 * of every field the 32-bit one truncated.
+	 *
+	 * The trap: a writer may emit all three structures even when nothing
+	 * overflowed, and a writer may also emit a 32-bit end record whose
+	 * fields are 0xffff and 0xffffffff placeholders. So the presence of the
+	 * locator decides, not the placeholder values, and when the locator is
+	 * there its numbers win over the 32-bit ones unconditionally. Preferring
+	 * the 32-bit copy whenever it is not a placeholder is the shape that
+	 * reads a truncated entry count on an archive written by a tool that
+	 * rounds.
+	 */
+	private void findZip64Eocd() {
+		if (eocdOff < 20) {
+			return;
+		}
+		Buf b = new Buf(file, eocdOff - 20, 20);
+		if (b.u32() != SIG_Z64_LOC) {
+			return;
+		}
+		b.u32();
+		long off = b.u64();
+		long disks = b.u32();
+		if (b.bad() || off < 0 || off > file.length - 56) {
+			fail("zip64 locator points at " + off + " in a " + file.length
+				+ " byte file");
+			return;
+		}
+		Buf z = new Buf(file, (int) off, file.length - (int) off);
+		if (z.u32() != SIG_Z64_EOCD) {
+			fail("zip64 locator points at " + off + ", which is not a zip64"
+				+ " end of central directory record");
+			return;
+		}
+		long recSize = z.u64();
+		z.u16();
+		z.u16();
+		long dn = z.u32();
+		long cd = z.u32();
+		long here = z.u64();
+		long total = z.u64();
+		long size = z.u64();
+		long cdoff = z.u64();
+		if (z.bad()) {
+			fail("zip64 end record: " + z.error());
+			return;
+		}
+		if (recSize < 44) {
+			fail("zip64 end record declares size " + recSize + ", under 44");
+			return;
+		}
+		if (total > Integer.MAX_VALUE || size > Integer.MAX_VALUE
+				|| cdoff > Integer.MAX_VALUE) {
+			fail("zip64 archive with " + total + " entries and a " + size
+				+ " byte directory at " + cdoff + " is beyond this reader");
+			return;
+		}
+		zip64Eocd = true;
+		z64Off = off;
+		z64Total = total;
+		diskNo = (int) dn;
+		cdDisk = (int) cd;
+		cdCountThisDisk = (int) here;
+		cdCount = (int) total;
+		cdSize = size;
+		cdOff = cdoff;
+		if (disks > 1) {
+			fail("zip64 locator declares " + disks + " disks");
+		}
 	}
 
 	/**
