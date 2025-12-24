@@ -39,6 +39,16 @@ njars=$(printf '%s\n' "$jars" | wc -l)
 echo "--- corpus: $njars jars in $work"
 [ "$njars" -ge 16 ] || { echo "corpus of $njars jars is too small"; exit 2; }
 
+# ------------------------------------------------- what the corpus contains
+# Counted with python3's zipfile and a raw byte scan, not with jarv, so that
+# a construct jarv cannot see reads as zero here and turns the suite red.
+if python3 "$here/constructs.py" $jars > "$work/constructs.txt"; then
+	ok "every required construct is present in the corpus"
+else
+	bad "corpus is missing a construct: $(grep '^MISSING' "$work/constructs.txt")"
+fi
+sed -n 's/^construct /     /p' "$work/constructs.txt"
+
 # ------------------------------- oracle: Info-ZIP zipinfo -v and unzip -l
 echo "--- oracle: zipinfo -v, unzip -l (Info-ZIP, no JDK code)"
 out=$(python3 "$here/zipcmp.py" "$root/jarv" $jars)
