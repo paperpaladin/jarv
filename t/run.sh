@@ -12,8 +12,20 @@ set -u
 
 here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 root=$(CDPATH= cd -- "$here/.." && pwd)
-work=$(mktemp -d)
-trap 'rm -rf "$work"' EXIT HUP INT TERM
+# JARV_CORPUS reuses a corpus built by an earlier run. It exists because
+# building one costs four keytool invocations and about half a minute, and
+# the mutation harness runs the suite dozens of times. It is opt-in by an
+# environment variable rather than a fixed path, so two concurrent ordinary
+# runs still cannot feed each other their jars.
+if [ -n "${JARV_CORPUS:-}" ]; then
+	work=$JARV_CORPUS
+	keep=1
+else
+	work=$(mktemp -d)
+	keep=0
+fi
+cleanup() { [ "$keep" = 0 ] && rm -rf "$work"; }
+trap cleanup EXIT HUP INT TERM
 
 pass=0
 fail=0
@@ -33,7 +45,9 @@ done
 ok "toolchain present"
 
 # ------------------------------------------------------------- build the corpus
-"$here/corpus.sh" "$work" >/dev/null || { echo "corpus build failed"; exit 2; }
+if [ ! -f "$work/good-rsa.jar" ]; then
+	"$here/corpus.sh" "$work" >/dev/null || { echo "corpus build failed"; exit 2; }
+fi
 jars=$(ls "$work"/*.jar | sort)
 njars=$(printf '%s\n' "$jars" | wc -l)
 echo "--- corpus: $njars jars in $work"
@@ -59,6 +73,40 @@ f=$(printf '%s\n' "$out" | sed -n 's/^ZIPCMP_FAIL //p')
 echo "ok   container: $p facts agree with Info-ZIP, $f disagree"
 pass=$((pass + p))
 fail=$((fail + f))
+
+# ---------------- oracle: coreutils digests, coreutils base64, jarsigner's
+# ---------------- own numbers in the .SF for the manifest byte ranges
+echo "--- oracle: coreutils sha*sum and base64, and jarsigner's .SF values"
+clean=""
+for j in good-rsa good-ec good-sha512 expired two-signers zip64 zip64-store \
+		zip64-dd stored nodd comment added; do
+	clean="$clean $work/$j.jar"
+done
+out=$(python3 "$here/mfcmp.py" "$root/jarv" clean $clean)
+printf '%s\n' "$out" | grep '^FAIL' || true
+p=$(printf '%s\n' "$out" | sed -n 's/^MFCMP_PASS //p')
+f=$(printf '%s\n' "$out" | sed -n 's/^MFCMP_FAIL //p')
+[ -n "$p" ] || { echo "mfcmp.py produced no count"; exit 2; }
+echo "ok   manifest: $p facts agree, $f disagree"
+pass=$((pass + p))
+fail=$((fail + f))
+
+# A tampered entry must show up as exactly one digest mismatch, and the
+# archive with an entry dropped as none, because dropping an entry does not
+# change any digest in the manifest. Both numbers are asserted so that a
+# verifier which found mismatches everywhere, or nowhere, is caught.
+for pair in tampered:1 bitflip:1 dropped:0 unsigned:0; do
+	j=${pair%%:*}
+	want=${pair##*:}
+	out=$(python3 "$here/mfcmp.py" "$root/jarv" dirty "$work/$j.jar")
+	got=$(printf '%s\n' "$out" | sed -n 's/^MFCMP_MISMATCH //p')
+	nf=$(printf '%s\n' "$out" | sed -n 's/^MFCMP_FAIL //p')
+	if [ "$got" = "$want" ] && [ "$nf" = 0 ]; then
+		ok "$j.jar: $got manifest digest mismatches, as expected"
+	else
+		bad "$j.jar: $got manifest digest mismatches, expected $want ($nf errors)"
+	fi
+done
 
 echo
 echo "$pass passed, $fail failed"

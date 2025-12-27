@@ -30,6 +30,22 @@ public final class Main {
 	public static void main(String[] args) {
 		List<String> modes = new ArrayList<String>();
 		String path = null;
+		if (args.length > 0 && args[0].equals("--b64")) {
+			// Many values per invocation: the suite compares a few thousand
+			// of these against coreutils and a JVM start each would cost
+			// more than the rest of the run put together.
+			int rc = EX_OK;
+			for (int i = 1; i < args.length; i++) {
+				byte[] d = B64.decode(args[i]);
+				if (d == null) {
+					System.out.println("-");
+					rc = EX_REFUSED;
+				} else {
+					System.out.println(Hex.of(d));
+				}
+			}
+			System.exit(rc);
+		}
 		for (String a : args) {
 			if (a.startsWith("--")) {
 				modes.add(a.substring(2));
@@ -67,6 +83,12 @@ public final class Main {
 		for (String m : modes) {
 			if (m.equals("zip")) {
 				dumpZip(z, out);
+			} else if (m.equals("manifest")) {
+				if (!dumpManifest(z, out)) {
+					return EX_REFUSED;
+				}
+			} else if (m.equals("digests")) {
+				dumpDigestFacts(new Jar(z), out);
 			} else if (m.equals("digest")) {
 				if (!dumpDigests(z, out)) {
 					return EX_REFUSED;
@@ -77,6 +99,151 @@ public final class Main {
 			}
 		}
 		return EX_OK;
+	}
+
+	/**
+	 * Every digest claim in the jar, with the value jarv computes beside
+	 * the value the file declares. The suite checks both against coreutils
+	 * rather than against each other.
+	 */
+	static void dumpDigestFacts(Jar j, PrintStream out) {
+		if (j.manifest == null) {
+			out.println("nomanifest");
+			return;
+		}
+		for (Manifest.Section s : j.manifest.sections) {
+			for (String alg : s.digestAlgorithms()) {
+				String jca = Digest.jcaName(alg);
+				String declared = s.get(alg + "-Digest");
+				byte[] want = jca == null ? null : B64.decode(declared);
+				String got = "-";
+				Entry e = find(j, s.name);
+				if (e != null && jca != null) {
+					try {
+						byte[] data = Data.read(j.zip, e);
+						byte[] d = Digest.of(jca, data, 0, data.length);
+						got = d == null ? "-" : Hex.of(d);
+					} catch (Data.BadData bad) {
+						got = "-";
+					}
+				}
+				out.printf("entrydig %s %s declared=%s computed=%s present=%d %s%n",
+					jca == null ? alg : jca, alg,
+					want == null ? "-" : Hex.of(want), got,
+					e == null ? 0 : 1, s.name);
+			}
+		}
+		for (Jar.Sig sig : j.sigs) {
+			if (sig.sf == null) {
+				continue;
+			}
+			for (int i = 0; i < sig.sf.main.keys.size(); i++) {
+				String k = sig.sf.main.keys.get(i);
+				String suffix = "-Digest-Manifest";
+				if (!Jar.endsIgnoreCase(k, suffix)) {
+					continue;
+				}
+				String jca = Digest.jcaName(
+					k.substring(0, k.length() - suffix.length()));
+				if (jca == null) {
+					continue;
+				}
+				byte[] want = B64.decode(sig.sf.main.values.get(i));
+				byte[] whole = Digest.of(jca, j.manifestBytes, 0,
+					j.manifestBytes.length);
+				out.printf("mfdig %s %s declared=%s whole=%s %s%n",
+					sig.sfName, jca, want == null ? "-" : Hex.of(want),
+					Hex.of(whole), k);
+			}
+			for (int i = 0; i < sig.sf.main.keys.size(); i++) {
+				String k = sig.sf.main.keys.get(i);
+				String suffix = "-Digest-Manifest-Main-Attributes";
+				if (!Jar.endsIgnoreCase(k, suffix)) {
+					continue;
+				}
+				String jca = Digest.jcaName(k.substring(0, k.length() - suffix.length()));
+				if (jca == null) {
+					continue;
+				}
+				byte[] want = B64.decode(sig.sf.main.values.get(i));
+				Manifest.Section ms = j.manifest.main;
+				out.printf("maindig %s %s declared=%s withblank=%s noblank=%s%n",
+					sig.sfName, jca, want == null ? "-" : Hex.of(want),
+					Hex.of(Digest.of(jca, j.manifestBytes, ms.off,
+						ms.endWithBlank - ms.off)),
+					Hex.of(Digest.of(jca, j.manifestBytes, ms.off,
+						ms.endNoBlank - ms.off)));
+			}
+			for (Manifest.Section s : sig.sf.sections) {
+				for (String alg : s.digestAlgorithms()) {
+					String jca = Digest.jcaName(alg);
+					if (jca == null) {
+						continue;
+					}
+					byte[] want = B64.decode(s.get(alg + "-Digest"));
+					Manifest.Section ms = j.manifest.forName(s.name);
+					if (ms == null) {
+						out.printf("sectdig %s %s declared=%s withblank=- noblank=-"
+								+ " %s%n", sig.sfName, jca,
+							want == null ? "-" : Hex.of(want), s.name);
+						continue;
+					}
+					out.printf("sectdig %s %s declared=%s withblank=%s noblank=%s"
+							+ " %s%n", sig.sfName, jca,
+						want == null ? "-" : Hex.of(want),
+						Hex.of(Digest.of(jca, j.manifestBytes, ms.off,
+							ms.endWithBlank - ms.off)),
+						Hex.of(Digest.of(jca, j.manifestBytes, ms.off,
+							ms.endNoBlank - ms.off)), s.name);
+				}
+			}
+		}
+	}
+
+	private static Entry find(Jar j, String name) {
+		for (Entry e : j.zip.entries()) {
+			if (e.name.equals(name)) {
+				return e;
+			}
+		}
+		return null;
+	}
+
+	/** The manifest, section by section, with the byte ranges. */
+	static boolean dumpManifest(Zip z, PrintStream out) {
+		for (Entry e : z.entries()) {
+			if (!e.name.equals("META-INF/MANIFEST.MF")
+					&& !(e.name.startsWith("META-INF/") && e.name.endsWith(".SF"))) {
+				continue;
+			}
+			byte[] b;
+			try {
+				b = Data.read(z, e);
+			} catch (Data.BadData bad) {
+				out.printf("nodata %s %s%n", e.name, bad.getMessage());
+				return false;
+			}
+			Manifest mf = new Manifest(b);
+			out.printf("file %s bytes=%d sections=%d problems=%d%n",
+				e.name, b.length, mf.sections.size(), mf.problems.size());
+			dumpSection(out, e.name, "-main-", mf.main);
+			for (Manifest.Section s : mf.sections) {
+				dumpSection(out, e.name, s.name, s);
+			}
+			for (String p : mf.problems) {
+				out.printf("mfproblem %s %s%n", e.name, p);
+			}
+		}
+		return true;
+	}
+
+	private static void dumpSection(PrintStream out, String file, String name,
+			Manifest.Section s) {
+		out.printf("sect %s off=%d endnb=%d endwb=%d attrs=%d name=%s%n",
+			file, s.off, s.endNoBlank, s.endWithBlank, s.keys.size(), name);
+		for (int i = 0; i < s.keys.size(); i++) {
+			out.printf("attr %s %s: %s%n", file, s.keys.get(i), s.values.get(i));
+		}
 	}
 
 	/** sha256 of every entry's uncompressed bytes, for the oracle to check. */
