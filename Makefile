@@ -18,3 +18,8 @@ clean:
 	rm -rf build scratch
 
 .PHONY: all test clean
+
+mutants: all
+	python3 t/mutants.py
+
+.PHONY: mutants

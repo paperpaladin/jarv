@@ -193,7 +193,7 @@ public final class Manifest {
 				byte[] prev = logical.get(logical.size() - 1);
 				byte[] joined = new byte[prev.length + l.length - 1];
 				System.arraycopy(prev, 0, joined, 0, prev.length);
-				int k = 0; while (k < l.length && l[k] == 32) { k++; } byte[] j2 = new byte[prev.length + l.length - k]; System.arraycopy(prev, 0, j2, 0, prev.length); System.arraycopy(l, k, j2, prev.length, l.length - k); joined = j2;
+				System.arraycopy(l, 1, joined, prev.length, l.length - 1);
 				logical.set(logical.size() - 1, joined);
 			} else {
 				logical.add(l);
