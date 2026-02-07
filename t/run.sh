@@ -74,6 +74,18 @@ echo "ok   container: $p facts agree with Info-ZIP, $f disagree"
 pass=$((pass + p))
 fail=$((fail + f))
 
+# -------------- oracle: coreutils base64 -d, and java.util.Base64 as a
+# -------------- second opinion, over a sweep of the padded-group alphabet
+javac -d "$work/probe" "$here/B64Probe.java" 2>/dev/null \
+	&& probe="$work/probe" || probe=""
+out=$(python3 "$here/b64cmp.py" "$root/jarv" $probe)
+printf '%s\n' "$out" | grep -E '^(FAIL|ok)' || true
+p=$(printf '%s\n' "$out" | sed -n 's/^B64CMP_PASS //p')
+f=$(printf '%s\n' "$out" | sed -n 's/^B64CMP_FAIL //p')
+[ -n "$p" ] || { echo "b64cmp.py produced no count"; exit 2; }
+pass=$((pass + p))
+fail=$((fail + f))
+
 # ---------------- oracle: coreutils digests, coreutils base64, jarsigner's
 # ---------------- own numbers in the .SF for the manifest byte ranges
 echo "--- oracle: coreutils sha*sum and base64, and jarsigner's .SF values"
