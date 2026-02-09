@@ -18,6 +18,7 @@ REQUIRED = [
     "no_data_descriptor", "stored", "deflated", "empty_entry", "directory",
     "archive_comment", "utf8_flag", "non_ascii_name", "name_over_72",
     "name_exactly_72", "signature_block", "signature_file", "manifest",
+    "fold_continuation", "fold_space_after_marker", "fold_splits_utf8",
 ]
 
 
@@ -66,6 +67,7 @@ def main():
                     counts["zip64_extra"] += 1
                 if nb == b"META-INF/MANIFEST.MF":
                     counts["manifest"] += 1
+                    folds(counts, z.read(info))
                 if nb.startswith(b"META-INF/") and nb.endswith(b".SF"):
                     counts["signature_file"] += 1
                 if nb.startswith(b"META-INF/") and (
@@ -79,6 +81,35 @@ def main():
         print("MISSING " + " ".join(missing))
         return 1
     return 0
+
+
+def folds(counts, mf):
+    """Continuation lines in a manifest, and the two awkward shapes.
+
+    A continuation is a physical line beginning with a space. The two
+    worth counting are the one whose next byte is also a space, which a
+    reader stripping whitespace loses, and the one whose preceding line
+    ends part way through a UTF-8 sequence, which a reader decoding line
+    by line cannot put back together.
+    """
+    lines = mf.split(b"\r\n")
+    prev = None
+    for line in lines:
+        if line.startswith(b" "):
+            counts["fold_continuation"] += 1
+            if line[1:2] == b" ":
+                counts["fold_space_after_marker"] += 1
+            if prev is not None and incomplete_utf8(prev):
+                counts["fold_splits_utf8"] += 1
+        prev = line
+
+
+def incomplete_utf8(b):
+    try:
+        b.decode("utf-8")
+        return False
+    except UnicodeDecodeError:
+        return True
 
 
 def extra_ids(extra):

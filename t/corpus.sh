@@ -54,6 +54,16 @@ for n in 62 65 66 67 68 72; do
 	printf 'len %s\n' "$n" > "$c/$nm"
 done
 
+# A name with a space exactly at the fold, so the continuation line begins
+# with two spaces: the marker, and one that belongs to the value. A reader
+# that strips leading whitespace instead of exactly one character loses it
+# and then matches no archive member. 66 bytes before the space puts it on
+# the boundary, because "Name: " is six and the first line holds 72.
+python3 -c "
+import sys, os
+open(os.path.join(sys.argv[1], 'x' * 66 + ' y.txt'), 'w').write('spaced\n')
+" "$c"
+
 # A name whose UTF-8 encoding is split by the fold in the middle of a
 # character. One ASCII byte then 22 three-byte characters is 67 bytes, so
 # the first line carries "Name: " plus 66 bytes of it and the break lands
