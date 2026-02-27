@@ -51,7 +51,7 @@ fi
 jars=$(ls "$work"/*.jar | sort)
 njars=$(printf '%s\n' "$jars" | wc -l)
 echo "--- corpus: $njars jars in $work"
-[ "$njars" -ge 16 ] || { echo "corpus of $njars jars is too small"; exit 2; }
+[ "$njars" -ge 18 ] || { echo "corpus of $njars jars is too small"; exit 2; }
 
 # ------------------------------------------------- what the corpus contains
 # Counted with python3's zipfile and a raw byte scan, not with jarv, so that
@@ -91,7 +91,7 @@ fail=$((fail + f))
 echo "--- oracle: coreutils sha*sum and base64, and jarsigner's .SF values"
 clean=""
 for j in good-rsa good-ec good-sha512 expired two-signers zip64 zip64-store \
-		zip64-dd stored nodd comment added; do
+		zip64-dd zip64-partial stored nodd comment added; do
 	clean="$clean $work/$j.jar"
 done
 out=$(python3 "$here/mfcmp.py" "$root/jarv" clean $clean)

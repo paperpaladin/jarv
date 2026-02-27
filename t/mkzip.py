@@ -49,13 +49,14 @@ def deflate(data):
     return c.compress(data) + c.flush()
 
 
-def write(path, items, zip64=False, dd=True, store=False, comment=b""):
+def build(items, zip64=False, dd=True, store=False, comment=b"",
+          zip64_partial=False):
     out = bytearray()
     central = bytearray()
     count = 0
     for nb, data, hint in items:
         isdir = nb.endswith(b"/")
-        method = 0 if (store or isdir or not data) else 8
+        method = 0 if (store or isdir or not data or hint == 0) else 8
         body = data if method == 0 else deflate(data)
         crc = binascii.crc32(data) & M32
         flags = 0x0800  # names are UTF-8
@@ -91,7 +92,14 @@ def write(path, items, zip64=False, dd=True, store=False, comment=b""):
                 out += struct.pack("<IIII", DD, crc, len(body), len(data))
         cex = b""
         ccs, cus, cloff = len(body), len(data), loff
-        if zip64:
+        if zip64_partial:
+            # Only the local header offset is moved out, which is the
+            # sparse case: a reader that takes all four values from the
+            # extra field in order reads this offset as the uncompressed
+            # size and never notices.
+            cex = struct.pack("<HHQ", 1, 8, loff)
+            cloff = M32
+        elif zip64:
             # The central copy is sparse: only the overflowed values, in the
             # order uncompressed, compressed, offset.
             cex = struct.pack("<HHQQQ", 1, 24, len(data), len(body), loff)
@@ -116,8 +124,52 @@ def write(path, items, zip64=False, dd=True, store=False, comment=b""):
         out += struct.pack("<IHHHHIIH", EOCD, 0, 0, count, count,
                            cdsize, cdoff, len(comment))
     out += comment
+    return bytes(out)
+
+
+def write(path, items, **kw):
     with open(path, "wb") as f:
-        f.write(bytes(out))
+        f.write(build(items, **kw))
+
+
+def decoy(src, dst):
+    """An archive with two other things that look like an end record.
+
+    One sits in the archive comment, after the real record, so a backward
+    scan meets it first; it is rejected because its comment length does
+    not reach the end of the file. The other sits inside a stored entry,
+    before the real record, and its comment length DOES reach the end of
+    the file, by construction: the archive comment is sized to make the
+    arithmetic work out. A reader scanning forwards takes it and sees an
+    empty central directory.
+
+    Two passes, because the fake record's comment-length field depends on
+    where it lands, which depends on how long the entry holding it is,
+    which is fixed. Patching two bytes inside the stored entry changes its
+    CRC but not any length, so nothing moves between the passes.
+    """
+    items = read(src)
+    marker = b"<<decoy>>"
+    fake = struct.pack("<IHHHHIIH", EOCD, 0, 0, 0, 0, 0, 0, 0)
+    items.insert(0, [b"decoy.bin", marker + fake + marker, 0])
+    clen = 64
+    comment = b"PK\x05\x06" + b"Z" * (clen - 4)
+    first = build(items, comment=comment)
+    f = first.index(marker) + len(marker)
+    e = first.rindex(b"PK\x05\x06", 0, len(first) - clen)
+    want = e + clen - f
+    if not 0 <= want <= 0xFFFF:
+        sys.exit("decoy: comment length %d out of range" % want)
+    items[0][1] = marker + fake[:20] + struct.pack("<H", want) + marker
+    second = build(items, comment=comment)
+    if len(second) != len(first):
+        sys.exit("decoy: the two passes differ in length")
+    if second.index(marker) + len(marker) != f:
+        sys.exit("decoy: the fake record moved between passes")
+    if f + 22 + want != len(second):
+        sys.exit("decoy: the fake record does not reach the end of the file")
+    with open(dst, "wb") as fh:
+        fh.write(second)
 
 
 def main():
@@ -130,7 +182,10 @@ def main():
         if "--comment" in opts:
             comment = opts[opts.index("--comment") + 1].encode()
         write(dst, items, zip64="--zip64" in opts, dd="--no-dd" not in opts,
-              store="--store" in opts, comment=comment)
+              store="--store" in opts, comment=comment,
+              zip64_partial="--zip64-partial" in opts)
+    elif cmd == "decoy":
+        decoy(src, dst)
     elif cmd == "add":
         name = sys.argv[4].encode("utf-8")
         items.append([name, sys.stdin.buffer.read(), 8])

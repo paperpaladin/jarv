@@ -304,10 +304,74 @@ def digests(tag, jar, jarv_bin):
                 % (tag, name, got, want))
 
 
+def jartf(tag, jar, jarv_bin):
+    """The JDK's own zip reader, through jar tf, on the name list.
+
+    This runs for every archive including the ones Info-ZIP cannot read,
+    because the JDK's reader is the one whose agreement decides whether
+    jarv and jarsigner are looking at the same archive at all.
+    """
+    rc, out = run(["jar", "tf", jar])
+    if rc != 0:
+        bad("%s jar tf exited %d" % (tag, rc))
+        return
+    theirs = sorted(l for l in out.splitlines() if l)
+    rc, jt = run([jarv_bin, "--zip", jar])
+    ours = sorted(l.split(" name=", 1)[1] for l in jt.splitlines()
+                  if l.startswith("cen "))
+    if ours == theirs:
+        ok("%s jar tf: %d names agree with the JDK's reader" % (tag, len(ours)))
+    else:
+        bad("%s jar tf: %d names from the JDK, %d from jarv; first difference %r"
+            % (tag, len(theirs), len(ours),
+               next((a for a, b in zip(ours + [None] * 9, theirs + [None] * 9)
+                     if a != b), None)))
+
+
+def decoy_divergence(tag, jar, jarv_bin):
+    """Three readers, three answers, recorded rather than smoothed over.
+
+    decoy.jar carries a second end of central directory record inside a
+    stored entry, placed so that its declared comment length reaches
+    exactly the end of the file, and a third one in the archive comment.
+    The JDK reads the real record. Info-ZIP takes the last signature it
+    finds without checking that the comment reaches the end, so it takes
+    the one in the comment and then cannot list the archive. python3's
+    zipfile does the same and refuses with "Bad offset for central
+    directory". jarv follows the JDK.
+    """
+    rc, jt = run([jarv_bin, "--zip", jar])
+    names = [l.split(" name=", 1)[1] for l in jt.splitlines()
+             if l.startswith("cen ")]
+    if "META-INF/MANIFEST.MF" in names and len(names) > 5:
+        ok("%s jarv found the real central directory (%d entries)"
+           % (tag, len(names)))
+    else:
+        bad("%s jarv found %d entries and %s the manifest; it took a decoy"
+            % (tag, len(names),
+               "found" if "META-INF/MANIFEST.MF" in names else "missed"))
+    rc, _ = run(["unzip", "-l", jar])
+    if rc != 0:
+        ok("%s unzip -l fails, as recorded" % tag)
+    else:
+        bad("%s unzip -l now succeeds; the recorded divergence is stale" % tag)
+    import zipfile
+    try:
+        zipfile.ZipFile(jar).namelist()
+        bad("%s python zipfile now reads it; the recorded divergence is stale"
+            % tag)
+    except Exception:
+        ok("%s python3 zipfile refuses it, as recorded" % tag)
+
+
 def main():
     jarv_bin = sys.argv[1]
     for jar in sys.argv[2:]:
         tag = jar.rsplit("/", 1)[-1]
+        jartf(tag, jar, jarv_bin)
+        if tag == "decoy.jar":
+            decoy_divergence(tag, jar, jarv_bin)
+            continue
         compare(tag, jar, jarv_bin)
         digests(tag, jar, jarv_bin)
     print("ZIPCMP_PASS %d" % PASS)

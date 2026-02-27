@@ -62,7 +62,12 @@ def coreutils_digest(jar, name, alg):
     p2 = subprocess.Popen([tool], stdin=p1.stdout, stdout=subprocess.PIPE)
     p1.stdout.close()
     out = p2.communicate()[0].decode()
-    p1.wait()
+    # An extractor that failed still feeds the digest tool an empty stream,
+    # and the digest of nothing is a perfectly good-looking hex string. It
+    # cost four invented failures on the decoy archive before this check
+    # existed, every one of them reported as the digest of an empty file.
+    if p1.wait() != 0:
+        return None
     return out.split()[0] if out else None
 
 

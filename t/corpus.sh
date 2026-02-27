@@ -116,6 +116,14 @@ $M rebuild "$w/good-rsa.jar" "$w/comment.jar" --comment "a trailing comment, whi
 # where the oracle refuses and jarv must be counted as unmatched rather
 # than as agreeing.
 $M rebuild "$w/good-rsa.jar" "$w/zip64-dd.jar" --zip64
+# Only the local header offset moved into the zip64 extra field, which is
+# the sparse central-directory case: a reader taking all four values in
+# order reads the offset as the uncompressed size.
+$M rebuild "$w/good-rsa.jar" "$w/zip64-partial.jar" --zip64-partial --no-dd
+# Two more things that look like an end of central directory record, one
+# before the real one inside a stored entry and one after it in the
+# archive comment. See mkzip.py's decoy().
+$M decoy "$w/good-rsa.jar" "$w/decoy.jar"
 
 # ------------------------------------------------------- after-the-fact edits
 printf 'this entry was never in the manifest\n' \

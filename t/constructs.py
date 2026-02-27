@@ -19,6 +19,7 @@ REQUIRED = [
     "archive_comment", "utf8_flag", "non_ascii_name", "name_over_72",
     "name_exactly_72", "signature_block", "signature_file", "manifest",
     "fold_continuation", "fold_space_after_marker", "fold_splits_utf8",
+    "decoy_end_record",
 ]
 
 
@@ -37,7 +38,17 @@ def main():
             clen = struct.unpack("<H", raw[i + 20:i + 22])[0]
             if clen:
                 counts["archive_comment"] += 1
-        with zipfile.ZipFile(path) as z:
+        if raw.count(b"PK\x05\x06") > 1:
+            counts["decoy_end_record"] += 1
+        try:
+            z = zipfile.ZipFile(path)
+        except Exception:
+            # python3's zipfile is fooled by the decoy end records and
+            # refuses the archive. Counted and skipped rather than fatal:
+            # the construct it cannot see is the one being counted.
+            print("construct %-20s %s" % ("python_refused", path))
+            continue
+        with z:
             for info in z.infolist():
                 counts["entries"] += 1
                 nb = info.orig_filename.encode("utf-8")
