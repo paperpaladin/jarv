@@ -46,6 +46,33 @@ public final class Main {
 			}
 			System.exit(rc);
 		}
+		if (args.length == 2 && args[0].equals("--derfile")) {
+			// A raw DER file rather than a jar, so the suite can hold
+			// jarv's decoder against openssl asn1parse over crafted
+			// encodings that no signer would produce.
+			byte[] b;
+			try {
+				b = Files.readAllBytes(Paths.get(args[1]));
+			} catch (IOException e) {
+				System.err.println("jarv: " + args[1] + ": " + e.getMessage());
+				System.exit(EX_USAGE);
+				return;
+			}
+			try {
+				java.util.List<Der.Node> all = new java.util.ArrayList<Der.Node>();
+				Der.walk(Der.parse(b), all);
+				for (Der.Node n : all) {
+					String oid = Der.oid(n);
+					System.out.printf("der %d d=%d hl=%d l=%d %s cls=%d tag=%d%s%n",
+						n.off, n.depth, n.hl, n.len, n.cons ? "cons" : "prim",
+						n.tagClass, n.tag, oid == null ? "" : " oid=" + oid);
+				}
+			} catch (Der.DerError e) {
+				System.err.println("jarv: " + e.getMessage());
+				System.exit(EX_REFUSED);
+			}
+			System.exit(EX_OK);
+		}
 		for (String a : args) {
 			if (a.startsWith("--")) {
 				modes.add(a.substring(2));
@@ -87,6 +114,10 @@ public final class Main {
 				if (!dumpManifest(z, out)) {
 					return EX_REFUSED;
 				}
+			} else if (m.equals("der")) {
+				if (!dumpDer(new Jar(z), out)) {
+					return EX_REFUSED;
+				}
 			} else if (m.equals("digests")) {
 				dumpDigestFacts(new Jar(z), out);
 			} else if (m.equals("digest")) {
@@ -99,6 +130,35 @@ public final class Main {
 			}
 		}
 		return EX_OK;
+	}
+
+	/**
+	 * The DER tree of every signature block, in a shape openssl asn1parse
+	 * can be compared against node by node.
+	 */
+	static boolean dumpDer(Jar j, PrintStream out) {
+		boolean okAll = true;
+		for (Jar.Sig s : j.sigs) {
+			if (s.blockBytes == null) {
+				continue;
+			}
+			out.printf("block %s %d%n", s.blockName, s.blockBytes.length);
+			try {
+				Der.Node root = Der.parse(s.blockBytes);
+				java.util.List<Der.Node> all = new java.util.ArrayList<Der.Node>();
+				Der.walk(root, all);
+				for (Der.Node n : all) {
+					String oid = Der.oid(n);
+					out.printf("der %d d=%d hl=%d l=%d %s cls=%d tag=%d%s%n",
+						n.off, n.depth, n.hl, n.len, n.cons ? "cons" : "prim",
+						n.tagClass, n.tag, oid == null ? "" : " oid=" + oid);
+				}
+			} catch (Der.DerError e) {
+				out.printf("derbad %s %s%n", s.blockName, e.getMessage());
+				okAll = false;
+			}
+		}
+		return okAll;
 	}
 
 	/**

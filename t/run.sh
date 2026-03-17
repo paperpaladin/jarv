@@ -120,6 +120,26 @@ for pair in tampered:1 bitflip:1 dropped:0 unsigned:0; do
 	fi
 done
 
+# --------------------------------- oracle: openssl asn1parse, node by node
+echo "--- oracle: openssl asn1parse over every signature block"
+mkdir -p "$work/der"
+out=$(python3 "$here/dercmp.py" "$root/jarv" "$work/der" $jars)
+printf '%s\n' "$out" | grep '^FAIL' || true
+p=$(printf '%s\n' "$out" | sed -n 's/^DERCMP_PASS //p')
+f=$(printf '%s\n' "$out" | sed -n 's/^DERCMP_FAIL //p')
+[ -n "$p" ] || { echo "dercmp.py produced no count"; exit 2; }
+echo "ok   DER: $p node facts agree with openssl asn1parse, $f disagree"
+pass=$((pass + p))
+fail=$((fail + f))
+
+out=$(python3 "$here/dercases.py" "$root/jarv" "$work/der")
+printf '%s\n' "$out" | grep -E '^(FAIL|ok)' || true
+p=$(printf '%s\n' "$out" | sed -n 's/^DERCASE_PASS //p')
+f=$(printf '%s\n' "$out" | sed -n 's/^DERCASE_FAIL //p')
+[ -n "$p" ] || { echo "dercases.py produced no count"; exit 2; }
+pass=$((pass + p))
+fail=$((fail + f))
+
 echo
 echo "$pass passed, $fail failed"
 [ "$fail" -eq 0 ]
