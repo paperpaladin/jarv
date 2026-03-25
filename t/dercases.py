@@ -39,6 +39,13 @@ CASES = [
     ("trailing-garbage", bytes([0x05, 0x00, 0xff]), "a byte after the value"),
     ("length-overruns", bytes([0x30, 0x05, 0x02, 0x01, 0x01]), "overrun"),
     ("reserved-length", bytes([0x04, 0xff, 0x01]), "reserved length form"),
+    # A padded length whose value is 128 or more, so that the
+    # shortest-form check is the only thing that can refuse it. The
+    # 5-byte case above is also caught by the "long form for a short
+    # length" check, which masked this one until a mutation run showed
+    # the padded-length check surviving.
+    ("padded-length-128", bytes([0x04, 0x83, 0x00, 0x00, 0x80]) + bytes(128),
+     "padded length of 128"),
     ("empty", b"", "nothing at all"),
     ("oid-padded-arc", bytes([0x06, 0x03, 0x2a, 0x80, 0x01]),
      "an OID arc padded with a zero septet"),
@@ -51,6 +58,7 @@ CASES = [
 LENIENT = {
     "indefinite-length", "long-form-for-5", "leading-zero-length",
     "high-tag-padded", "high-tag-for-5", "oid-padded-arc",
+    "padded-length-128",
 }
 
 

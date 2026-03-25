@@ -63,7 +63,7 @@ MUTANTS = [
      "		if ((acc & ((1 << bits) - 1)) != 0) {\n			return null;\n		}", ""),
     ("der: accept BER indefinite length", "Der.java",
      'throw new DerError("indefinite length at " + p + ", which is BER"\n				+ " and not DER");',
-     'length = end - q - 2;'),
+     'length = end - q;'),
     ("der: accept a non-minimal long-form length", "Der.java",
      '			if (length < 128) {\n				throw new DerError("length " + length + " at " + p + " written"\n					+ " in the long form");\n			}', ""),
     ("der: accept a padded length", "Der.java",
