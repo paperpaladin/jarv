@@ -140,6 +140,19 @@ f=$(printf '%s\n' "$out" | sed -n 's/^DERCASE_FAIL //p')
 pass=$((pass + p))
 fail=$((fail + f))
 
+# ------------------- oracle: openssl pkcs7 -print, and keytool -printcert
+echo "--- oracle: openssl pkcs7 -print, keytool -printcert -jarfile"
+out=$(python3 "$here/p7cmp.py" "$root/jarv" "$work/der" $jars)
+printf '%s\n' "$out" | grep -E '^(FAIL|refused)' || true
+p=$(printf '%s\n' "$out" | sed -n 's/^P7CMP_PASS //p')
+f=$(printf '%s\n' "$out" | sed -n 's/^P7CMP_FAIL //p')
+r=$(printf '%s\n' "$out" | sed -n 's/^P7CMP_REFUSED //p')
+[ -n "$p" ] || { echo "p7cmp.py produced no count"; exit 2; }
+echo "ok   PKCS7: $p facts agree with openssl and keytool, $f disagree," \
+	"$r refused by the oracle"
+pass=$((pass + p))
+fail=$((fail + f))
+
 echo
 echo "$pass passed, $fail failed"
 [ "$fail" -eq 0 ]

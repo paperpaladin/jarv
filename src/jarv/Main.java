@@ -118,6 +118,10 @@ public final class Main {
 				if (!dumpDer(new Jar(z), out)) {
 					return EX_REFUSED;
 				}
+			} else if (m.equals("pkcs7")) {
+				if (!dumpPkcs7(new Jar(z), out)) {
+					return EX_REFUSED;
+				}
 			} else if (m.equals("digests")) {
 				dumpDigestFacts(new Jar(z), out);
 			} else if (m.equals("digest")) {
@@ -130,6 +134,65 @@ public final class Main {
 			}
 		}
 		return EX_OK;
+	}
+
+	/** The SignedData structure, in facts openssl pkcs7 -print also states. */
+	static boolean dumpPkcs7(Jar j, PrintStream out) {
+		boolean allOk = true;
+		for (Jar.Sig s : j.sigs) {
+			if (s.blockBytes == null) {
+				continue;
+			}
+			Pkcs7 p7;
+			try {
+				p7 = new Pkcs7(s.blockBytes);
+			} catch (Der.DerError e) {
+				out.printf("p7bad %s %s%n", s.blockName, e.getMessage());
+				allOk = false;
+				continue;
+			}
+			out.printf("p7 %s version=%d contenttype=%s detached=%d certs=%d"
+					+ " signers=%d crls=%d%n",
+				s.blockName, p7.version, p7.contentType,
+				p7.content == null ? 1 : 0, p7.certs.size(),
+				p7.signers.size(), p7.hasCrls ? 1 : 0);
+			for (String a : p7.digestAlgorithms) {
+				out.printf("p7digestalg %s %s%n", s.blockName, a);
+			}
+			for (int i = 0; i < p7.certs.size(); i++) {
+				X509 c = p7.certs.get(i);
+				out.printf("cert %s %d version=%d serial=%s sigalg=%s keyalg=%s"
+						+ " ca=%d exts=%d%n",
+					s.blockName, i, c.version, c.serial.toString(),
+					c.sigAlgOid, c.keyAlgOid, c.isCa ? 1 : 0,
+					c.extensions.size());
+				out.printf("certissuer %s %d %s%n", s.blockName, i, c.issuer);
+				out.printf("certsubject %s %d %s%n", s.blockName, i, c.subject);
+				out.printf("certnotbefore %s %d %s%n", s.blockName, i,
+					c.notBeforeText);
+				out.printf("certnotafter %s %d %s%n", s.blockName, i,
+					c.notAfterText);
+				byte[] enc = c.cert.encoded();
+				out.printf("certfp %s %d %s%n", s.blockName, i,
+					Hex.of(Digest.of("SHA-256", enc, 0, enc.length)));
+			}
+			for (int i = 0; i < p7.signers.size(); i++) {
+				Pkcs7.Signer sg = p7.signers.get(i);
+				out.printf("signer %s %d version=%d digest=%s enc=%s serial=%s"
+						+ " siglen=%d nauth=%d nunauth=%d ts=%d%n",
+					s.blockName, i, sg.version, sg.digestOid, sg.encryptionOid,
+					sg.serial.toString(), sg.signature.length, sg.auth.size(),
+					sg.unauth.size(), sg.hasTimestamp ? 1 : 0);
+				out.printf("signerissuer %s %d %s%n", s.blockName, i, sg.issuer);
+				for (Pkcs7.Attr a : sg.auth) {
+					out.printf("authattr %s %d %s%n", s.blockName, i, a.oid);
+				}
+				for (Pkcs7.Attr a : sg.unauth) {
+					out.printf("unauthattr %s %d %s%n", s.blockName, i, a.oid);
+				}
+			}
+		}
+		return allOk;
 	}
 
 	/**
