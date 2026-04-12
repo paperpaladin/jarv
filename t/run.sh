@@ -153,6 +153,19 @@ echo "ok   PKCS7: $p facts agree with openssl and keytool, $f disagree," \
 pass=$((pass + p))
 fail=$((fail + f))
 
+# ---------- oracle: openssl pkeyutl -verifyrecover and openssl dgst -verify
+echo "--- oracle: openssl pkeyutl -verifyrecover, openssl dgst -verify"
+mkdir -p "$work/sig"
+out=$(python3 "$here/sigcmp.py" "$root/jarv" "$work/sig" $jars)
+printf '%s\n' "$out" | grep -E '^(FAIL|refused)' || true
+p=$(printf '%s\n' "$out" | sed -n 's/^SIGCMP_PASS //p')
+f=$(printf '%s\n' "$out" | sed -n 's/^SIGCMP_FAIL //p')
+r=$(printf '%s\n' "$out" | sed -n 's/^SIGCMP_REFUSED //p')
+[ -n "$p" ] || { echo "sigcmp.py produced no count"; exit 2; }
+echo "ok   signatures: $p facts agree with openssl, $f disagree, $r refused"
+pass=$((pass + p))
+fail=$((fail + f))
+
 echo
 echo "$pass passed, $fail failed"
 [ "$fail" -eq 0 ]

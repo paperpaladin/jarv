@@ -160,6 +160,24 @@ public final class Pkcs7 {
 	}
 
 	/**
+	 * The certificate a SignerInfo points at, or null.
+	 *
+	 * Matched on the raw DER of the issuer name and on the serial, not on
+	 * the printed name. Two names that print alike can encode differently,
+	 * and a match made on the printed form joins a signer to a
+	 * certificate nobody issued it.
+	 */
+	public X509 certFor(Signer s) {
+		for (X509 c : certs) {
+			if (c.serial.equals(s.serial)
+					&& java.util.Arrays.equals(c.issuerDer, s.issuerDer)) {
+				return c;
+			}
+		}
+		return null;
+	}
+
+	/**
 	 * The bytes a signature over authenticated attributes covers.
 	 *
 	 * PKCS#7 says the attributes are signed as a SET OF, DER-encoded,

@@ -24,7 +24,7 @@ public final class Main {
 	}
 
 	private static final String USAGE =
-		"usage: jarv [--zip] [--manifest] [--sf] [--der] [--certs]\n"
+		"usage: jarv [--zip] [--manifest] [--der] [--pkcs7] [--sig]\n"
 		+ "            [--entries] [--verify] FILE.jar";
 
 	public static void main(String[] args) {
@@ -122,6 +122,10 @@ public final class Main {
 				if (!dumpPkcs7(new Jar(z), out)) {
 					return EX_REFUSED;
 				}
+			} else if (m.equals("sig")) {
+				if (!dumpSig(new Jar(z), out)) {
+					return EX_REFUSED;
+				}
 			} else if (m.equals("digests")) {
 				dumpDigestFacts(new Jar(z), out);
 			} else if (m.equals("digest")) {
@@ -134,6 +138,85 @@ public final class Main {
 			}
 		}
 		return EX_OK;
+	}
+
+	/**
+	 * Everything about one signature that an outside tool can be asked
+	 * the same question about: which bytes are signed, what the signature
+	 * is, which certificate it belongs to, and for RSA the DigestInfo the
+	 * signature decrypts to. openssl pkeyutl -verifyrecover produces that
+	 * last one from the signature and the public key alone, so it is a
+	 * check on the modular exponentiation and the unpad together.
+	 */
+	static boolean dumpSig(Jar j, PrintStream out) {
+		boolean allOk = true;
+		for (Jar.Sig s : j.sigs) {
+			if (s.blockBytes == null || s.sfBytes == null) {
+				continue;
+			}
+			Pkcs7 p7;
+			try {
+				p7 = new Pkcs7(s.blockBytes);
+			} catch (Der.DerError e) {
+				out.printf("sigbad %s %s%n", s.blockName, e.getMessage());
+				allOk = false;
+				continue;
+			}
+			for (int i = 0; i < p7.signers.size(); i++) {
+				Pkcs7.Signer sg = p7.signers.get(i);
+				byte[] signed = sg.authAttrs == null ? s.sfBytes
+					: Pkcs7.authAttrBytes(sg);
+				String over = sg.authAttrs == null ? "content" : "authattrs";
+				String digest = Digest.jcaForOid(sg.digestOid);
+				X509 c = p7.certFor(sg);
+				out.printf("sigalg %s %d keytype=%s digest=%s enc=%s over=%s"
+						+ " cert=%d%n",
+					s.blockName, i, Digest.keyTypeForSigAlg(sg.encryptionOid),
+					digest, sg.encryptionOid, over, c == null ? 0 : 1);
+				out.printf("sigsigned %s %d %s%n", s.blockName, i,
+					Hex.of(signed));
+				out.printf("sigbytes %s %d %s%n", s.blockName, i,
+					Hex.of(sg.signature));
+				if (c != null) {
+					byte[] enc = c.cert.encoded();
+					out.printf("sigcert %s %d %s%n", s.blockName, i,
+						Hex.of(Digest.of("SHA-256", enc, 0, enc.length)));
+				}
+				if (c == null || digest == null) {
+					out.printf("sigverdict %s %d refused no %s%n", s.blockName,
+						i, c == null ? "signer certificate in the block"
+							: "digest algorithm for " + sg.digestOid);
+					allOk = false;
+					continue;
+				}
+				if (!"RSA".equals(Digest.keyTypeForSigAlg(sg.encryptionOid))) {
+					out.printf("sigverdict %s %d refused %s is not RSA%n",
+						s.blockName, i, sg.encryptionOid);
+					continue;
+				}
+				Rsa.Key key;
+				try {
+					key = Rsa.publicKey(c);
+				} catch (Der.DerError e) {
+					out.printf("sigverdict %s %d refused %s%n", s.blockName, i,
+						e.getMessage());
+					allOk = false;
+					continue;
+				}
+				out.printf("sigkey %s %d bits=%d e=%s%n", s.blockName, i,
+					key.n.bitLength(), key.e.toString());
+				byte[] em = Rsa.primitive(key, sg.signature);
+				byte[] t = em == null ? null : Rsa.unpad(em);
+				if (t != null) {
+					out.printf("sigrecovered %s %d %s%n", s.blockName, i,
+						Hex.of(t));
+				}
+				String why = Rsa.verify(key, digest, signed, sg.signature);
+				out.printf("sigverdict %s %d %s%n", s.blockName, i,
+					why == null ? "ok" : "bad " + why);
+			}
+		}
+		return allOk;
 	}
 
 	/** The SignedData structure, in facts openssl pkcs7 -print also states. */
