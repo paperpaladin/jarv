@@ -189,9 +189,27 @@ public final class Main {
 					allOk = false;
 					continue;
 				}
-				if (!"RSA".equals(Digest.keyTypeForSigAlg(sg.encryptionOid))) {
-					out.printf("sigverdict %s %d refused %s is not RSA%n",
-						s.blockName, i, sg.encryptionOid);
+				String kind = Digest.keyTypeForSigAlg(sg.encryptionOid);
+				if ("EC".equals(kind)) {
+					String why;
+					try {
+						Ec.Curve cv = Ec.curveOf(c);
+						out.printf("sigcurve %s %d %s%n", s.blockName, i,
+							cv.name);
+						why = Ec.verify(cv, Ec.publicPoint(cv, c.keyBits),
+							digest, signed, sg.signature);
+					} catch (Der.DerError e) {
+						out.printf("sigverdict %s %d refused %s%n",
+							s.blockName, i, e.getMessage());
+						continue;
+					}
+					out.printf("sigverdict %s %d %s%n", s.blockName, i,
+						why == null ? "ok" : "bad " + why);
+					continue;
+				}
+				if (!"RSA".equals(kind)) {
+					out.printf("sigverdict %s %d refused %s is neither RSA"
+						+ " nor ECDSA%n", s.blockName, i, sg.encryptionOid);
 					continue;
 				}
 				Rsa.Key key;

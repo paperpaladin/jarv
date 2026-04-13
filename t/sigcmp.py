@@ -21,10 +21,14 @@ Three questions per signer, each asked of openssl rather than of jarv:
   3. Do the two tools reach the same verdict? openssl's "Verified OK"
      against jarv's ok or bad.
 
-Question 2 is asked for ECDSA blocks as well, even though jarv refuses
-to verify them: openssl can verify the bytes jarv nominates, so the
-re-tagging is checked for EC signatures too and the verdict is counted
-as a refusal rather than as an agreement.
+Question 1 is RSA only, because there is nothing to recover from an
+ECDSA signature. Questions 2 and 3 are asked of both.
+
+A refusal is only accepted as a refusal for a key type jarv does not
+claim to verify. A refusal on an RSA or EC signature is counted as a
+disagreement, because otherwise any defect that turns verification
+into a shrug passes the suite, which is what happened once already and
+is recorded in the commit that added this file.
 
 Prints SIGCMP_PASS n, SIGCMP_FAIL n and SIGCMP_REFUSED n.
 """
@@ -200,7 +204,7 @@ def main():
                     " are signed: %s" % (tag, alg, msg.strip()[:120]))
 
             v = d.get("verdict", "")
-            if v.startswith("refused") and d.get("keytype") == "RSA":
+            if v.startswith("refused") and d.get("keytype") in ("RSA", "EC"):
                 # A refusal is only honest for something jarv says it does
                 # not do, and RSA is not on that list. Counting this one as
                 # a refusal would let any mutation that turns verification
@@ -208,8 +212,9 @@ def main():
                 # unused-bits mutant did before this branch existed: it
                 # moved 16 agreements into the refused column and the run
                 # still printed 0 failed.
-                bad("%s: jarv %s for an RSA signature openssl %s"
-                    % (tag, v, "accepts" if accepted else "rejects"))
+                bad("%s: jarv %s for an %s signature openssl %s"
+                    % (tag, v, d.get("keytype"),
+                       "accepts" if accepted else "rejects"))
             elif v.startswith("refused"):
                 refuse("%s: jarv %s (openssl says %s)"
                        % (tag, v, "verified" if accepted else "rejected"))
