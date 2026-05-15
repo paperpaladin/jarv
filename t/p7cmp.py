@@ -64,10 +64,17 @@ def parse_openssl(text):
     for line in text.splitlines():
         stripped = line.strip()
         indent = len(line) - len(line.lstrip())
-        if stripped == "cert:" and indent <= 8:
+        # openssl prints one "cert:" header and then a "cert_info:" block
+        # per certificate, so the per-certificate delimiter is the second
+        # of those. Splitting on "cert:" counted a two-certificate chain
+        # as one, and said so only once the corpus grew a chain.
+        if stripped == "cert_info:" and indent <= 8:
             cur = {"algs": []}
             out["certs"].append(cur)
             section = "cert"
+            continue
+        if stripped == "cert:" and indent <= 8:
+            section = "top"
             continue
         if stripped == "signer_info:" and indent <= 8:
             cur = {"algs": [], "auth": []}

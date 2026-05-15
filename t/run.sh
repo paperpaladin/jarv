@@ -51,7 +51,7 @@ fi
 jars=$(ls "$work"/*.jar | sort)
 njars=$(printf '%s\n' "$jars" | wc -l)
 echo "--- corpus: $njars jars in $work"
-[ "$njars" -ge 18 ] || { echo "corpus of $njars jars is too small"; exit 2; }
+[ "$njars" -ge 22 ] || { echo "corpus of $njars jars is too small"; exit 2; }
 
 # ------------------------------------------------- what the corpus contains
 # Counted with python3's zipfile and a raw byte scan, not with jarv, so that
@@ -150,6 +150,16 @@ r=$(printf '%s\n' "$out" | sed -n 's/^P7CMP_REFUSED //p')
 [ -n "$p" ] || { echo "p7cmp.py produced no count"; exit 2; }
 echo "ok   PKCS7: $p facts agree with openssl and keytool, $f disagree," \
 	"$r refused by the oracle"
+pass=$((pass + p))
+fail=$((fail + f))
+
+# ------------------------------- oracle: openssl ecparam, for the curves
+out=$(python3 "$here/curvecmp.py" "$root/jarv")
+printf '%s\n' "$out" | grep '^FAIL' || true
+p=$(printf '%s\n' "$out" | sed -n 's/^CURVECMP_PASS //p')
+f=$(printf '%s\n' "$out" | sed -n 's/^CURVECMP_FAIL //p')
+[ -n "$p" ] || { echo "curvecmp.py produced no count"; exit 2; }
+echo "ok   curves: $p constants agree with openssl ecparam, $f disagree"
 pass=$((pass + p))
 fail=$((fail + f))
 

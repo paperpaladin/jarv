@@ -30,6 +30,31 @@ kt -genkeypair -alias rsa2 -keyalg RSA -keysize 2048 -sigalg SHA256withRSA \
 	-dname "CN=jarv rsa two, OU=corpus, O=jarv" -validity 3650 >/dev/null 2>&1
 kt -genkeypair -alias ec1 -keyalg EC -groupname secp256r1 -sigalg SHA256withECDSA \
 	-dname "CN=jarv ec one, OU=corpus, O=jarv" -validity 3650 >/dev/null 2>&1
+# P-384 and P-521 as well, because the three curves are different code
+# paths and P-521 is the one where the group order is not a whole number
+# of bytes. A digest truncated to 66 bytes instead of to 521 bits keeps
+# seven bits too many and rejects every valid signature.
+kt -genkeypair -alias ec384 -keyalg EC -groupname secp384r1 \
+	-sigalg SHA384withECDSA \
+	-dname "CN=jarv ec p384, OU=corpus, O=jarv" -validity 3650 >/dev/null 2>&1
+kt -genkeypair -alias ec521 -keyalg EC -groupname secp521r1 \
+	-sigalg SHA512withECDSA \
+	-dname "CN=jarv ec p521, OU=corpus, O=jarv" -validity 3650 >/dev/null 2>&1
+# A real two-certificate chain. Every other key here is self-signed, so
+# issuer and subject are the same string and nothing can tell them
+# apart: a mutation that swapped the two survived the whole suite for
+# exactly that reason.
+kt -genkeypair -alias ca -keyalg RSA -keysize 2048 -sigalg SHA256withRSA \
+	-dname "CN=jarv root ca, OU=corpus, O=jarv" -validity 3650 -ext bc:c \
+	>/dev/null 2>&1
+kt -genkeypair -alias leaf -keyalg RSA -keysize 2048 -sigalg SHA256withRSA \
+	-dname "CN=jarv leaf, OU=corpus, O=jarv" -validity 3650 >/dev/null 2>&1
+kt -certreq -alias leaf -file "$w/leaf.csr" >/dev/null 2>&1
+kt -gencert -alias ca -infile "$w/leaf.csr" -outfile "$w/leaf.cer" -rfc \
+	-validity 3000 >/dev/null 2>&1
+kt -exportcert -alias ca -rfc -file "$w/ca.cer" >/dev/null 2>&1
+cat "$w/leaf.cer" "$w/ca.cer" > "$w/chain.pem"
+kt -importcert -alias leaf -file "$w/chain.pem" -noprompt >/dev/null 2>&1
 # Starts three years ago and lasts a day, so it is expired now. keytool will
 # happily make one; jarsigner warns when signing with it and warns again when
 # verifying, which is the second verdict the corpus needs.
@@ -89,6 +114,15 @@ js "$w/good-rsa.jar" rsa1 >/dev/null
 cp "$w/base.jar" "$w/good-ec.jar"
 js "$w/good-ec.jar" ec1 >/dev/null
 
+cp "$w/base.jar" "$w/ec384.jar"
+js -digestalg SHA-384 -sigalg SHA384withECDSA "$w/ec384.jar" ec384 >/dev/null
+
+cp "$w/base.jar" "$w/ec521.jar"
+js -digestalg SHA-512 -sigalg SHA512withECDSA "$w/ec521.jar" ec521 >/dev/null
+
+cp "$w/base.jar" "$w/chain.jar"
+js "$w/chain.jar" leaf >/dev/null
+
 cp "$w/base.jar" "$w/good-sha512.jar"
 js -digestalg SHA-512 -sigalg SHA512withRSA "$w/good-sha512.jar" rsa1 >/dev/null
 
@@ -131,6 +165,11 @@ printf 'this entry was never in the manifest\n' \
 printf 'ALPHA\n' | $M replace "$w/good-rsa.jar" "$w/tampered.jar" alpha.txt
 $M bitflip "$w/good-rsa.jar" "$w/bitflip.jar" a/blob.bin 100
 $M drop "$w/good-rsa.jar" "$w/dropped.jar" beta.txt
+# One bit of the signature block, which is the last byte of the
+# encryptedDigest because nothing follows it in the SignerInfo. Nothing
+# in the manifest covers a signature block, so this breaks the signature
+# and nothing else.
+$M bitflip "$w/good-rsa.jar" "$w/sigflip.jar" META-INF/RSA1.RSA -1
 
 rm -f "$w/base.jar"
 echo "corpus in $w"

@@ -85,10 +85,15 @@ public final class Ec {
 			"011839296a789a3bc0045c8a5fb42c7d1bd998f54449579b446817afbd17273e"
 				+ "662c97ee72995ef42640c550b9013fad0761353c7086a272c24088be9476"
 				+ "9fd16650",
-			"01ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
-				+ "fffffffffffffffffffffffffffffffa51868783bf2f966b7fcc0148f709"
-				+ "a5d03bb5c9b8899c47aebb6fb71e91386409"),
+			"01ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+				+ "fffffa51868783bf2f966b7fcc0148f709a5d03bb5c9b8899c47aebb6f"
+				+ "b71e91386409"),
 	};
+
+	/** Every curve in the table, for the suite to hold against openssl. */
+	public static Curve[] all() {
+		return CURVES.clone();
+	}
 
 	public static Curve curve(String oid) {
 		for (Curve c : CURVES) {

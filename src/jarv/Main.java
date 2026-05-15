@@ -46,6 +46,20 @@ public final class Main {
 			}
 			System.exit(rc);
 		}
+		if (args.length == 1 && args[0].equals("--curves")) {
+			// Six constants per curve, typed in by hand from the standard.
+			// One of them was wrong: P-521's group order carried fourteen
+			// extra f bytes, which rejected every P-521 signature. Printed
+			// so openssl ecparam can be asked the same six questions.
+			for (Ec.Curve c : Ec.all()) {
+				System.out.printf("curve %s %s p=%s a=%s b=%s gx=%s gy=%s"
+						+ " n=%s%n",
+					c.oid, c.name, c.p.toString(16), c.a.toString(16),
+					c.b.toString(16), c.gx.toString(16), c.gy.toString(16),
+					c.n.toString(16));
+			}
+			System.exit(EX_OK);
+		}
 		if (args.length == 2 && args[0].equals("--derfile")) {
 			// A raw DER file rather than a jar, so the suite can hold
 			// jarv's decoder against openssl asn1parse over crafted

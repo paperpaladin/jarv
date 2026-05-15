@@ -199,9 +199,14 @@ def main():
             if accepted:
                 ok("%s: openssl dgst -%s -verify accepts the %d bytes jarv"
                    " says are signed" % (tag, alg, len(d["signed"]) // 2))
-            else:
-                bad("%s: openssl dgst -%s -verify rejects the bytes jarv says"
-                    " are signed: %s" % (tag, alg, msg.strip()[:120]))
+            # When openssl rejects, the two possible causes cannot be told
+            # apart from here: jarv may have nominated the wrong bytes, or
+            # the signature may simply be broken, which is what sigflip.jar
+            # is for. So no claim is made about the signed bytes and the
+            # verdict comparison below carries the case on its own. Asked
+            # the other way round this was a false failure: sigflip.jar
+            # reported that jarv had the signed bytes wrong when the whole
+            # point of that archive is a broken signature.
 
             v = d.get("verdict", "")
             if v.startswith("refused") and d.get("keytype") in ("RSA", "EC"):

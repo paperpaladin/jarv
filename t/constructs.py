@@ -9,7 +9,10 @@ the suite goes red rather than quietly agreeing with itself.
 
 Exits non-zero if any construct listed as required is absent.
 """
+import os
+import re
 import struct
+import subprocess
 import sys
 import zipfile
 
@@ -19,7 +22,8 @@ REQUIRED = [
     "archive_comment", "utf8_flag", "non_ascii_name", "name_over_72",
     "name_exactly_72", "signature_block", "signature_file", "manifest",
     "fold_continuation", "fold_space_after_marker", "fold_splits_utf8",
-    "decoy_end_record",
+    "decoy_end_record", "rsa_block", "ec_block", "curve_p256", "curve_p384",
+    "curve_p521", "multi_cert_block", "issuer_differs_from_subject",
 ]
 
 
@@ -85,6 +89,11 @@ def main():
                         nb.endswith(b".RSA") or nb.endswith(b".DSA")
                         or nb.endswith(b".EC")):
                     counts["signature_block"] += 1
+                    if nb.endswith(b".RSA"):
+                        counts["rsa_block"] += 1
+                    if nb.endswith(b".EC"):
+                        counts["ec_block"] += 1
+                    block(counts, z.read(info))
     missing = [k for k in REQUIRED if counts[k] == 0]
     for k in REQUIRED:
         print("construct %-20s %d" % (k, counts[k]))
@@ -92,6 +101,42 @@ def main():
         print("MISSING " + " ".join(missing))
         return 1
     return 0
+
+
+def block(counts, der):
+    """What is inside a signature block, asked of openssl, not of jarv.
+
+    The curve and the certificate count need an ASN.1 decoder and python
+    has none in its standard library, so openssl is the one asked. It is
+    an oracle here as everywhere else in this suite.
+    """
+    import tempfile
+    fd, path = tempfile.mkstemp(suffix=".der")
+    os.write(fd, der)
+    os.close(fd)
+    try:
+        p = subprocess.run(["openssl", "pkcs7", "-inform", "DER", "-in", path,
+                            "-print_certs"], stdout=subprocess.PIPE,
+                           stderr=subprocess.DEVNULL)
+        text = p.stdout.decode("utf-8", "replace")
+        if text.count("BEGIN CERTIFICATE") > 1:
+            counts["multi_cert_block"] += 1
+        subs = re.findall(r"^subject=(.*)$", text, re.M)
+        isss = re.findall(r"^issuer=(.*)$", text, re.M)
+        for a, b in zip(subs, isss):
+            if a != b:
+                counts["issuer_differs_from_subject"] += 1
+        p = subprocess.run(["openssl", "asn1parse", "-inform", "DER", "-in",
+                            path], stdout=subprocess.PIPE,
+                           stderr=subprocess.DEVNULL)
+        text = p.stdout.decode("utf-8", "replace")
+        for needle, key in (("prime256v1", "curve_p256"),
+                            ("secp384r1", "curve_p384"),
+                            ("secp521r1", "curve_p521")):
+            if needle in text:
+                counts[key] += 1
+    finally:
+        os.unlink(path)
 
 
 def folds(counts, mf):
