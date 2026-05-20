@@ -176,6 +176,19 @@ echo "ok   signatures: $p facts agree with openssl, $f disagree, $r refused"
 pass=$((pass + p))
 fail=$((fail + f))
 
+# ---- crafted encoded messages, signed with the corpus private key, with
+# ---- jarsigner as the oracle in both directions
+echo "--- crafted PKCS#1 encoded messages, against jarsigner"
+mkdir -p "$work/em"
+out=$(python3 "$here/emcases.py" "$root/jarv" "$work/em" "$work")
+printf '%s\n' "$out" | grep '^FAIL' || true
+p=$(printf '%s\n' "$out" | sed -n 's/^EMCASE_PASS //p')
+f=$(printf '%s\n' "$out" | sed -n 's/^EMCASE_FAIL //p')
+[ -n "$p" ] || { echo "emcases.py produced no count"; exit 2; }
+echo "ok   encoded messages: $p agree with jarsigner, $f disagree"
+pass=$((pass + p))
+fail=$((fail + f))
+
 echo
 echo "$pass passed, $fail failed"
 [ "$fail" -eq 0 ]
