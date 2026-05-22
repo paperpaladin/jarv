@@ -118,8 +118,12 @@ MUTANTS = [
     ("rsa: the digest named in the DigestInfo is not checked against the"
      " one the signer declares", "Rsa.java",
      "		if (!named.equals(digestJca)) {", "		if (false) {"),
-    ("rsa: digest algorithm parameters may be anything", "Rsa.java",
+    ("rsa: digest algorithm parameters need not be NULL", "Rsa.java",
      "		if (alg.kids.size() == 2 && !alg.kid(1).is(Der.UNIVERSAL, Der.NULL)) {",
+     "		if (false) {"),
+    ("rsa: a NULL in the digest algorithm parameters may carry content",
+     "Rsa.java",
+     "		if (alg.kids.size() == 2 && alg.kid(1).len != 0) {",
      "		if (false) {"),
     ("ec: u1 and u2 swapped", "Ec.java",
      "		Pt p = add(c, mul(c, u1, g), mul(c, u2, q));",

@@ -229,10 +229,19 @@ def main():
     cases.append(("wrongalg", pad(digest_info(other, odg), k), False,
                   "a DigestInfo naming %s where the signer declares %s"
                   % (other, alg)))
-    # Parameters that are an INTEGER rather than NULL. Everything else
-    # is correct, so only the parameters rule can reject it.
-    cases.append(("params", pad(digest_info(alg, dg, "0201ff"), k), False,
-                  "digest algorithm parameters that are an integer"))
+    # Two rules cover the digest algorithm parameters field, and the
+    # first version of this file reached both with one case: parameters
+    # holding an INTEGER are neither NULL nor zero length, so deleting
+    # either rule left the other to reject it and the mutation of the
+    # first survived. Each rule gets a case that only it can reject.
+    # A zero-length OCTET STRING is not NULL and is zero length.
+    cases.append(("params", pad(digest_info(alg, dg, "0400"), k), False,
+                  "digest algorithm parameters that are an empty octet"
+                  " string rather than NULL"))
+    # A NULL carrying a content byte is NULL and is not zero length.
+    cases.append(("nullcontent", pad(digest_info(alg, dg, "0501ff"), k), False,
+                  "a NULL with a content byte in the digest algorithm"
+                  " parameters"))
     # An encoded message that does not start 00 01.
     em = bytearray(good_em)
     em[1] = 0x02
