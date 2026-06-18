@@ -203,6 +203,17 @@ public final class Main {
 					allOk = false;
 					continue;
 				}
+				String attrs = Pkcs7.checkAttrs(p7, sg, s.sfBytes, digest);
+				Pkcs7.Attr md = sg.findAuth(Pkcs7.OID_MESSAGE_DIGEST);
+				Der.Node mdv = md == null ? null : Pkcs7.single(md);
+				out.printf("sigattrs %s %d check=%s md=%s ct=%s%n",
+					s.blockName, i, attrs == null ? "ok" : attrs,
+					mdv == null ? "-" : Hex.of(mdv.content()),
+					contentTypeOf(sg));
+				if (attrs != null) {
+					out.printf("sigverdict %s %d %s%n", s.blockName, i, attrs);
+					continue;
+				}
 				String kind = Digest.keyTypeForSigAlg(sg.encryptionOid);
 				if ("EC".equals(kind)) {
 					String why;
@@ -249,6 +260,14 @@ public final class Main {
 			}
 		}
 		return allOk;
+	}
+
+	/** The contentType authenticated attribute, or "-". */
+	static String contentTypeOf(Pkcs7.Signer sg) {
+		Pkcs7.Attr a = sg.findAuth(Pkcs7.OID_CONTENT_TYPE);
+		Der.Node v = a == null ? null : Pkcs7.single(a);
+		String oid = v == null ? null : Der.oid(v);
+		return oid == null ? "-" : oid;
 	}
 
 	/** The SignedData structure, in facts openssl pkcs7 -print also states. */

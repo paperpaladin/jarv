@@ -308,10 +308,83 @@ def main():
             bad("%s: jarv and jarsigner disagree, jarv %s and jarsigner %s"
                 % (name, verdict, "verified" if jaccepted else "rejected"))
 
+    attr_cases(jarv, work, src, block_name, der, mkzip)
     ec_cases(jarv, work, corpus, mkzip)
     print("EMCASE_PASS %d" % PASS)
     print("EMCASE_FAIL %d" % FAIL)
     return 0
+
+
+def attr_cases(jarv, work, src, block_name, der, mkzip):
+    """The two authenticated attributes that tie a signature to content.
+
+    Both are patched in place at their original length, so the block
+    stays well formed and only the attribute value changes. Patching
+    them also breaks the signature over the attribute set, which is the
+    point of asking for the verdict TEXT: jarv must say the attribute
+    is wrong, which it checks first, rather than reaching the signature
+    and saying the digest does not match. A harness reading only
+    accept-or-reject cannot tell those two apart, and the mutations
+    that delete each attribute check produce exactly the second.
+    """
+    p = os.path.join(work, "attr.der")
+    open(p, "wb").write(der)
+    _, out = run(["openssl", "asn1parse", "-inform", "DER", "-in", p])
+    lines = out.splitlines()
+
+    def after(label, kind):
+        seen = False
+        for line in lines:
+            if not seen:
+                seen = label in line
+                continue
+            m = re.match(r"\s*(\d+):d=\d+\s+hl=\s*(\d+)\s+l=\s*(\d+)"
+                         r"\s+prim:\s+" + kind, line)
+            if m:
+                return (int(m.group(1)) + int(m.group(2)), int(m.group(3)))
+        return (None, None)
+
+    cases = []
+    off, ln = after(":messageDigest", "OCTET STRING")
+    if off is None:
+        bad("no messageDigest attribute in " + block_name)
+    else:
+        b = bytearray(der)
+        b[off] ^= 0x01
+        cases.append(("attr-md", bytes(b), "bad the signed messageDigest",
+                      "one bit flipped in the messageDigest attribute"))
+    off, ln = after(":contentType", "OBJECT")
+    if off is None:
+        bad("no contentType attribute in " + block_name)
+    else:
+        b = bytearray(der)
+        # id-data is 1.2.840.113549.1.7.1 and id-signedData is ...7.2,
+        # so one byte makes a valid object identifier of the same
+        # length that is the wrong content type.
+        b[off + ln - 1] = 0x02
+        cases.append(("attr-ct", bytes(b), "bad the signed contentType",
+                      "contentType changed to signedData"))
+
+    for name, blob, expect, why in cases:
+        jar = os.path.join(work, "%s.jar" % name)
+        r = subprocess.run(["python3", mkzip, "replace", src, jar,
+                            block_name], input=blob,
+                           stdout=subprocess.PIPE,
+                           stderr=subprocess.STDOUT)
+        if r.returncode != 0:
+            bad("%s: mkzip replace failed" % name)
+            continue
+        verdict, accepted = verdict_of(jarv, jar, block_name)
+        if not accepted and verdict.startswith(expect):
+            ok("%s: jarv rejects, %s" % (name, why))
+        else:
+            bad("%s: jarv said %r where %r was expected"
+                % (name, verdict, expect))
+        jrc, jout = run(["jarsigner", "-verify", jar])
+        if not (jrc == 0 and "jar verified." in jout):
+            ok("%s: jarsigner rejects too" % name)
+        else:
+            bad("%s: jarsigner verified it" % name)
 
 
 def tlvs(work, der):

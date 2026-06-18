@@ -33,10 +33,12 @@ is recorded in the commit that added this file.
 Prints SIGCMP_PASS n, SIGCMP_FAIL n and SIGCMP_REFUSED n.
 """
 import binascii
+import hashlib
 import os
 import re
 import subprocess
 import sys
+import zipfile
 
 PASS = 0
 FAIL = 0
@@ -84,10 +86,22 @@ def parse_jarv(text):
                 d[k] = v
         elif f[0] == "sigverdict":
             d["verdict"] = " ".join(f[3:])
-        elif f[0] == "sigkey":
-            for kv in f[3:]:
-                k, _, v = kv.partition("=")
-                d[k] = v
+        elif f[0] in ("sigkey", "sigattrs"):
+            # sigattrs carries check=... which may hold spaces; the
+            # fields after it are md= and ct=, so it is taken whole and
+            # then trimmed back at the next key.
+            rest = " ".join(f[3:])
+            for key in ("ct=", "md="):
+                i = rest.find(" " + key)
+                if i >= 0:
+                    d[key[:-1]] = rest[i + 1 + len(key):].split(" ")[0]
+                    rest = rest[:i]
+            if f[0] == "sigattrs":
+                d["attrs"] = rest[len("check="):]
+            else:
+                for kv in f[3:]:
+                    k, _, v = kv.partition("=")
+                    d[k] = v
         else:
             d[f[0][3:]] = f[3] if len(f) > 3 else ""
     return sigs
@@ -121,7 +135,6 @@ def main():
         # The blocks, extracted once per jar with python's zipfile so the
         # extraction is not jarv's own container parse.
         blocks = {}
-        import zipfile
         try:
             with zipfile.ZipFile(jar) as z:
                 for name in set(k[0] for k in sigs):
@@ -169,6 +182,36 @@ def main():
             open(sigf, "wb").write(binascii.unhexlify(d["bytes"]))
             signedf = os.path.join(work, "signed.bin")
             open(signedf, "wb").write(binascii.unhexlify(d["signed"]))
+
+            # The two authenticated attributes that tie the signature to
+            # the content. The digest is recomputed here with hashlib,
+            # which is neither the JDK nor jarv, and the content is the
+            # .SF file read out with python's zipfile.
+            if d.get("attrs") is not None and d.get("md", "-") != "-":
+                sfname = block.rsplit(".", 1)[0] + ".SF"
+                try:
+                    with zipfile.ZipFile(jar) as z:
+                        sfbytes = z.read(sfname)
+                except Exception as e:
+                    refuse("%s could not read %s: %s" % (tag, sfname, e))
+                    sfbytes = None
+                if sfbytes is not None:
+                    hname = d["digest"].replace("-", "").lower()
+                    want = hashlib.new(hname, sfbytes).hexdigest()
+                    if want == d["md"]:
+                        ok("%s: the signed messageDigest is the %s of %s"
+                           % (tag, d["digest"], sfname))
+                    else:
+                        bad("%s: the signed messageDigest is %s and %s"
+                            " digests to %s" % (tag, d["md"], sfname, want))
+            if d.get("ct") is not None:
+                # RFC 5652 requires contentType to equal the
+                # encapsulated content type, which for a detached JAR
+                # block is id-data.
+                if d["ct"] == "1.2.840.113549.1.7.1":
+                    ok("%s: the signed contentType is id-data" % tag)
+                else:
+                    bad("%s: the signed contentType is %s" % (tag, d["ct"]))
 
             if "recovered" in d:
                 recf = os.path.join(work, "rec.bin")

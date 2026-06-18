@@ -178,6 +178,75 @@ public final class Pkcs7 {
 	}
 
 	/**
+	 * The single value of an attribute, or null when it does not carry
+	 * exactly one.
+	 *
+	 * An attribute is a SET OF, so several values or none are both
+	 * syntactically legal. contentType and messageDigest are each
+	 * defined to carry exactly one, and a verifier that reads the first
+	 * of several has let the signer put a second one where another
+	 * reader might look instead.
+	 */
+	public static Der.Node single(Attr a) {
+		return a.values.kids.size() == 1 ? a.values.kids.get(0) : null;
+	}
+
+	/**
+	 * The two authenticated attributes that connect the signature to
+	 * the content, or null when both are right.
+	 *
+	 * When authenticated attributes are present the signature covers the
+	 * attribute set and not the content. So the attribute set has to say
+	 * which content it is about, and the two attributes that do it are
+	 * mandatory in RFC 5652: contentType, which must equal the
+	 * encapsulated content type, and messageDigest, which must equal the
+	 * digest of the content. Without them the signature is over a set of
+	 * attributes that is correctly signed and attached to nothing.
+	 *
+	 * The content here is the .SF file, because a JAR signature block is
+	 * detached.
+	 */
+	public static String checkAttrs(Pkcs7 p7, Signer s, byte[] content,
+			String digestJca) {
+		if (s.authAttrs == null) {
+			return null;
+		}
+		Attr ct = s.findAuth(OID_CONTENT_TYPE);
+		if (ct == null) {
+			return "bad authenticated attributes with no contentType";
+		}
+		Der.Node v = single(ct);
+		String oid = v == null ? null : Der.oid(v);
+		if (oid == null) {
+			return "bad a contentType attribute that is not one object"
+				+ " identifier";
+		}
+		if (!oid.equals(p7.contentType)) {
+			return "bad the signed contentType is " + oid + " and the"
+				+ " content is " + p7.contentType;
+		}
+		Attr md = s.findAuth(OID_MESSAGE_DIGEST);
+		if (md == null) {
+			return "bad authenticated attributes with no messageDigest";
+		}
+		v = single(md);
+		if (v == null || !v.is(Der.UNIVERSAL, Der.OCTET_STRING) || v.cons) {
+			return "bad a messageDigest attribute that is not one primitive"
+				+ " octet string";
+		}
+		byte[] want = v.content();
+		byte[] got = Digest.of(digestJca, content, 0, content.length);
+		if (got == null) {
+			return "refused no " + digestJca + " available";
+		}
+		if (!java.util.Arrays.equals(got, want)) {
+			return "bad the signed messageDigest is " + Hex.of(want)
+				+ " and the signature file digests to " + Hex.of(got);
+		}
+		return null;
+	}
+
+	/**
 	 * The bytes a signature over authenticated attributes covers.
 	 *
 	 * PKCS#7 says the attributes are signed as a SET OF, DER-encoded,
