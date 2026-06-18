@@ -134,6 +134,24 @@ def pad(t, k):
     return b"\x00\x01" + b"\xff" * (k - 3 - len(t)) + b"\x00" + t
 
 
+def verdict_of(jarv, jar, block_name):
+    """jarv's verdict for one signature block, and whether it is ok.
+
+    A missing verdict line counts as a rejection and as a verdict of
+    "", which no expected fragment matches. That matters: a mutation
+    that makes jarv throw instead of deciding produces no line at all,
+    and a harness reading only accept-or-reject would score the crash
+    as a correct rejection.
+    """
+    rc, out = run([jarv, "--sig", jar])
+    verdict = ""
+    for line in out.splitlines():
+        f = line.split(" ")
+        if f[0] == "sigverdict" and f[1] == block_name:
+            verdict = " ".join(f[3:])
+    return verdict, verdict == "ok"
+
+
 def main():
     jarv = sys.argv[1]
     work = sys.argv[2]
@@ -199,26 +217,26 @@ def main():
     good_em = pad(good_t, k)
 
     cases = []
-    cases.append(("control", good_em, True,
+    cases.append(("control", good_em, True, "ok",
                   "the original encoded message, re-signed"))
     # Bleichenbacher's shape: the DigestInfo is correct and complete and
     # there are bytes after it. A verifier that stops looking once it has
     # parsed a DigestInfo accepts this, and with a small public exponent
     # it can be built without the private key at all.
     t = good_t + b"\x5a" * 8
-    cases.append(("trailing", pad(t, k), False,
+    cases.append(("trailing", pad(t, k), False, "bad",
                   "eight bytes after a correct DigestInfo"))
     em = bytearray(good_em)
     em[5] = 0xFE
-    cases.append(("nonff", bytes(em), False,
+    cases.append(("nonff", bytes(em), False, "bad the encoded message",
                   "one padding byte that is not 0xFF"))
     em = bytearray(good_em)
     em[k - len(good_t) - 1] = 0x01
-    cases.append(("nosep", bytes(em), False,
+    cases.append(("nosep", bytes(em), False, "bad the encoded message",
                   "the 0x00 separator replaced by 0x01"))
     em = bytearray(good_em)
     em[-1] ^= 0x01
-    cases.append(("wrongdigest", bytes(em), False,
+    cases.append(("wrongdigest", bytes(em), False, "bad the signed digest",
                   "one bit flipped in the digest"))
     # A DigestInfo naming SHA-256 and carrying a real SHA-256 digest of
     # the signed bytes, inside a SignerInfo that declares SHA-384. The
@@ -227,6 +245,7 @@ def main():
     other = "SHA-256" if alg != "SHA-256" else "SHA-512"
     odg = hashlib.new(other.replace("-", "").lower(), signed).digest()
     cases.append(("wrongalg", pad(digest_info(other, odg), k), False,
+                  "bad the signature is over",
                   "a DigestInfo naming %s where the signer declares %s"
                   % (other, alg)))
     # Two rules cover the digest algorithm parameters field, and the
@@ -236,19 +255,21 @@ def main():
     # first survived. Each rule gets a case that only it can reject.
     # A zero-length OCTET STRING is not NULL and is zero length.
     cases.append(("params", pad(digest_info(alg, dg, "0400"), k), False,
+                  "bad digest algorithm parameters that are not NULL",
                   "digest algorithm parameters that are an empty octet"
                   " string rather than NULL"))
     # A NULL carrying a content byte is NULL and is not zero length.
-    cases.append(("nullcontent", pad(digest_info(alg, dg, "0501ff"), k), False,
+    cases.append(("nullcontent", pad(digest_info(alg, dg, "0501ff"), k),
+                  False, "bad a NULL with content",
                   "a NULL with a content byte in the digest algorithm"
                   " parameters"))
     # An encoded message that does not start 00 01.
     em = bytearray(good_em)
     em[1] = 0x02
-    cases.append(("blocktype", bytes(em), False,
+    cases.append(("blocktype", bytes(em), False, "bad the encoded message",
                   "block type 2 rather than 1"))
 
-    for name, em, want_ok, why in cases:
+    for name, em, want_ok, expect, why in cases:
         if len(em) != k:
             bad("%s: built a %d-byte encoded message for a %d-byte modulus"
                 % (name, len(em), k))
@@ -264,18 +285,17 @@ def main():
             bad("%s: mkzip replace failed: %s"
                 % (name, p.stdout.decode()[:120]))
             continue
-        rc, out = run([jarv, "--sig", jar])
-        verdict = ""
-        for line in out.splitlines():
-            f = line.split(" ")
-            if f[0] == "sigverdict" and f[1] == block_name:
-                verdict = " ".join(f[3:])
-        accepted = verdict == "ok"
-        if accepted == want_ok:
+        verdict, accepted = verdict_of(jarv, jar, block_name)
+        if accepted == want_ok and verdict.startswith(expect):
             ok("%s: jarv %s, %s" % (name, "accepts" if accepted else "rejects",
                                     why))
         else:
-            bad("%s: jarv said %r for %s" % (name, verdict, why))
+            # The verdict text is checked and not only the yes or no.
+            # Several of these cases are rejected for more than one
+            # reason at once, and a harness that only asks whether jarv
+            # said no cannot tell which rule did the work.
+            bad("%s: jarv said %r where %r was expected, for %s"
+                % (name, verdict, expect, why))
         jrc, jout = run(["jarsigner", "-verify", jar])
         jaccepted = jrc == 0 and "jar verified." in jout
         if jaccepted == want_ok:
@@ -288,9 +308,110 @@ def main():
             bad("%s: jarv and jarsigner disagree, jarv %s and jarsigner %s"
                 % (name, verdict, "verified" if jaccepted else "rejected"))
 
+    ec_cases(jarv, work, corpus, mkzip)
     print("EMCASE_PASS %d" % PASS)
     print("EMCASE_FAIL %d" % FAIL)
     return 0
+
+
+def tlvs(work, der):
+    """Every top-level value in a DER blob: (offset, header, length)."""
+    p = os.path.join(work, "part.der")
+    open(p, "wb").write(der)
+    _, out = run(["openssl", "asn1parse", "-inform", "DER", "-in", p])
+    rows = []
+    for line in out.splitlines():
+        m = re.match(r"\s*(\d+):d=(\d+)\s+hl=\s*(\d+)\s+l=\s*(\d+)"
+                     r"\s+(\w+):\s*(\S*)", line)
+        if m:
+            rows.append((int(m.group(1)), int(m.group(2)), int(m.group(3)),
+                         int(m.group(4)), m.group(6)))
+    return rows
+
+
+def ec_cases(jarv, work, corpus, mkzip):
+    """Crafted ECDSA signatures, with the lengths left alone.
+
+    An ECDSA signature is SEQUENCE { INTEGER r, INTEGER s }, and a
+    crafted r or s of a different magnitude would be a different number
+    of bytes, which would move every enclosing length in the block. So
+    the content octets of an integer are overwritten in place instead:
+    zeroing them gives a non-minimal encoding of zero, which is exactly
+    the out-of-range value the range check exists for, at the original
+    length.
+
+    The public point is attacked the same way, by flipping one bit of
+    the x coordinate inside the certificate's SubjectPublicKeyInfo. The
+    result is almost certainly not on the curve, and the certificate is
+    the right length still.
+    """
+    src = os.path.join(corpus, "good-ec.jar")
+    if not os.path.exists(src):
+        bad("no good-ec.jar in the corpus")
+        return
+    block_name = "META-INF/EC1.EC"
+    der = zipfile.ZipFile(src).read(block_name)
+    off, ln = last_octet_string(work, der)
+    if off is None:
+        bad("no signature octet string in " + block_name)
+        return
+    sig = der[off:off + ln]
+    ints = [r for r in tlvs(work, sig) if r[4] == "INTEGER"]
+    if len(ints) != 2:
+        bad("an ECDSA signature of %d integers" % len(ints))
+        return
+    # The public key bit string: one unused-bits octet, then 0x04 and
+    # two 32-byte coordinates for P-256.
+    pk = None
+    for o, depth, hl, l, kind in tlvs(work, der):
+        if kind == "BIT" and l == 66 and der[o + hl] == 0 \
+                and der[o + hl + 1] == 4:
+            pk = o + hl + 2
+            break
+    cases = []
+    cases.append(("ec-control", der, True, "ok",
+                  "the block as jarsigner wrote it"))
+    for which, (o, _d, hl, l, _k) in zip(("r", "s"), ints):
+        b = bytearray(der)
+        for i in range(l):
+            b[off + o + hl + i] = 0
+        cases.append(("ec-zero-" + which, bytes(b), False,
+                      "bad r or s is outside",
+                      which + " set to zero at its original length"))
+    if pk is not None:
+        b = bytearray(der)
+        b[pk] ^= 0x01
+        cases.append(("ec-offcurve", bytes(b), False,
+                      "refused the public point is not on",
+                      "one bit flipped in the x coordinate of the"
+                      " public key"))
+    else:
+        bad("no uncompressed P-256 public key found in " + block_name)
+
+    for name, blob, want_ok, expect, why in cases:
+        jar = os.path.join(work, "%s.jar" % name)
+        p = subprocess.run(["python3", mkzip, "replace", src, jar,
+                            block_name], input=blob,
+                           stdout=subprocess.PIPE,
+                           stderr=subprocess.STDOUT)
+        if p.returncode != 0:
+            bad("%s: mkzip replace failed" % name)
+            continue
+        verdict, accepted = verdict_of(jarv, jar, block_name)
+        if accepted == want_ok and verdict.startswith(expect):
+            ok("%s: jarv %s, %s"
+               % (name, "accepts" if accepted else "rejects", why))
+        else:
+            bad("%s: jarv said %r where %r was expected, for %s"
+                % (name, verdict, expect, why))
+        jrc, jout = run(["jarsigner", "-verify", jar])
+        jaccepted = jrc == 0 and "jar verified." in jout
+        if jaccepted == want_ok:
+            ok("%s: jarsigner %s too"
+               % (name, "verifies" if jaccepted else "rejects"))
+        else:
+            bad("%s: jarsigner exited %d saying %r"
+                % (name, jrc, jout.strip().splitlines()[:1]))
 
 
 sys.exit(main())

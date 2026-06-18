@@ -18,6 +18,11 @@ import java.math.BigInteger;
  * r and s must both be in [1, n-1], the public point must be on the
  * curve, the digest is truncated to the bit length of n and not to its
  * byte length, and the comparison is r == x1 mod n rather than r == x1.
+ *
+ * Two of those four are reachable from the corpus and two are not. The
+ * reasons are in the comments beside them and in the README, because a
+ * check nothing can make fail is worth no more than the argument for
+ * why.
  */
 public final class Ec {
 	private Ec() {
@@ -224,10 +229,16 @@ public final class Ec {
 	/**
 	 * The integer a digest stands for.
 	 *
-	 * Truncation is by BIT length of the group order, not by byte length.
-	 * The two agree for P-256 and P-384 and differ for P-521, where n is
-	 * 521 bits: a verifier that truncates to 66 bytes keeps seven bits
-	 * too many for a SHA-512 digest and rejects valid signatures.
+	 * Truncation is by BIT length of the group order, which is what
+	 * FIPS 186-4 says. It is worth being honest about how much that
+	 * costs here: over the three curves in this file and the five SHA
+	 * digests in use, bit truncation and byte truncation never give a
+	 * different answer. The only curve whose order is not a whole
+	 * number of bytes is P-521, and no digest is longer than its 66
+	 * bytes, so nothing is truncated on it at all. A mutation that
+	 * switches this line to byte truncation survives the whole suite
+	 * for that reason, and the survivor is recorded rather than dressed
+	 * up with a case that cannot tell the two apart.
 	 */
 	static BigInteger e(Curve c, byte[] digest) {
 		BigInteger z = new BigInteger(1, digest);
