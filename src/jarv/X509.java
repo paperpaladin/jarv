@@ -119,6 +119,48 @@ public final class X509 {
 		}
 	}
 
+	/**
+	 * The certificates from a SignedData, ordered leaf first.
+	 *
+	 * The certificate set in a SignedData is a SET, which is unordered
+	 * by definition, and the JDK's own output prints it in encoding
+	 * order. Chain building is matching each certificate's issuer DER
+	 * against another certificate's subject DER, and the match is on
+	 * the raw DER rather than on the printed name: a PrintableString
+	 * and a UTF8String of the same text print alike and are different
+	 * names, and joining on the printed form builds a chain nobody
+	 * issued.
+	 *
+	 * The walk stops at a self-issued certificate or when nothing in
+	 * the set issued the one in hand, so a cycle cannot loop forever.
+	 */
+	public static java.util.List<X509> chain(java.util.List<X509> pool,
+			X509 leaf) {
+		java.util.List<X509> out = new java.util.ArrayList<X509>();
+		X509 cur = leaf;
+		while (cur != null && out.size() <= pool.size()) {
+			out.add(cur);
+			if (java.util.Arrays.equals(cur.issuerDer, cur.subjectDer)) {
+				return out;
+			}
+			X509 next = null;
+			for (X509 c : pool) {
+				if (java.util.Arrays.equals(c.subjectDer, cur.issuerDer)
+						&& !out.contains(c)) {
+					next = c;
+					break;
+				}
+			}
+			cur = next;
+		}
+		return out;
+	}
+
+	/** A certificate whose issuer and subject are the same name. */
+	public boolean selfIssued() {
+		return java.util.Arrays.equals(issuerDer, subjectDer);
+	}
+
 	static String algOid(Der.Node alg) throws Der.DerError {
 		if (alg.kids.isEmpty()) {
 			throw new Der.DerError("an algorithm identifier with no oid");

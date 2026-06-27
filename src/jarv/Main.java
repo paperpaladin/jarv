@@ -318,6 +318,17 @@ public final class Main {
 					sg.serial.toString(), sg.signature.length, sg.auth.size(),
 					sg.unauth.size(), sg.hasTimestamp ? 1 : 0);
 				out.printf("signerissuer %s %d %s%n", s.blockName, i, sg.issuer);
+				X509 leaf = p7.certFor(sg);
+				if (leaf != null) {
+					java.util.List<X509> ch = X509.chain(p7.certs, leaf);
+					out.printf("chainlen %s %d %d root=%d%n", s.blockName, i,
+						ch.size(),
+						ch.get(ch.size() - 1).selfIssued() ? 1 : 0);
+					for (int k = 0; k < ch.size(); k++) {
+						out.printf("chain %s %d %d %s%n", s.blockName, i, k,
+							ch.get(k).subject);
+					}
+				}
 				for (Pkcs7.Attr a : sg.auth) {
 					out.printf("authattr %s %d %s%n", s.blockName, i, a.oid);
 				}

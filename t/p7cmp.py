@@ -140,6 +140,13 @@ def parse_jarv(text):
                       "certnotafter", "certfp"):
             rest = line.split(" ", 3)[3]
             blocks[f[1]]["certs"].setdefault(int(f[2]), {})[kind] = rest
+        elif kind == "chain":
+            blocks[f[1]]["signers"].setdefault(int(f[2]), {}) \
+                .setdefault("chain", []).append(line.split(" ", 4)[4])
+        elif kind == "chainlen":
+            kv = dict(x.split("=", 1) for x in f[4:] if "=" in x)
+            blocks[f[1]]["signers"].setdefault(int(f[2]), {})["root"] = \
+                kv.get("root")
         elif kind == "signerissuer":
             rest = line.split(" ", 3)[3]
             blocks[f[1]]["signers"].setdefault(int(f[2]), {})[kind] = rest
@@ -147,6 +154,35 @@ def parse_jarv(text):
             blocks[f[1]]["signers"].setdefault(int(f[2]), {}) \
                 .setdefault("auth", []).append(f[3])
     return blocks
+
+
+def chain_from(certs, issuer, serial):
+    """Leaf-first chain over openssl's printed subjects and issuers."""
+    by_subject = {}
+    for c in certs:
+        by_subject.setdefault(c.get("subject"), c)
+    cur = None
+    for c in certs:
+        if c.get("issuer") == issuer and c.get("serialNumber") == serial:
+            cur = c
+            break
+    out = []
+    seen = set()
+    while cur is not None and cur.get("subject") not in seen:
+        out.append(cur.get("subject"))
+        seen.add(cur.get("subject"))
+        if cur.get("issuer") == cur.get("subject"):
+            break
+        cur = by_subject.get(cur.get("issuer"))
+    return out
+
+
+def last_issuer(certs, subject):
+    """The issuer of the certificate with this subject, or None."""
+    for c in certs:
+        if c.get("subject") == subject:
+            return c.get("issuer")
+    return None
 
 
 def cmp1(tag, what, mine, theirs):
@@ -222,6 +258,17 @@ def check(jarv, work, jar):
             cmp1(t, "signer%d.encalg" % i, ms["enc"], os_["algs"][1])
             cmp1(t, "signer%d.authattrs" % i, ",".join(ms.get("auth", [])),
                  ",".join(os_["auth"]))
+            # The chain, rebuilt here from openssl's own subject and
+            # issuer strings rather than read back from jarv. The
+            # SignedData certificate set is a SET and so unordered, and
+            # openssl prints it in encoding order, so an ordering that
+            # happened to agree with the file would prove nothing.
+            want = chain_from(theirs["certs"], os_["issuer"], os_["serial"])
+            cmp1(t, "signer%d.chain" % i, " -> ".join(ms.get("chain", [])),
+                 " -> ".join(want))
+            cmp1(t, "signer%d.chainroot" % i, ms.get("root"),
+                 "1" if want and want[-1] == last_issuer(theirs["certs"],
+                                                         want[-1]) else "0")
 
 
 def keytool_check(jarv, jar):
