@@ -115,12 +115,33 @@ public final class Main {
 		System.exit(run(modes, file, System.out));
 	}
 
+	/**
+	 * The time certificate validity is judged against.
+	 *
+	 * JARV_NOW holds seconds since the epoch and exists so the suite can
+	 * ask what the verdict would have been on a given day. Without it an
+	 * expiry test is a test that passes until the certificate expires
+	 * and then passes for the wrong reason.
+	 */
+	static long now() {
+		String s = System.getenv("JARV_NOW");
+		if (s != null) {
+			try {
+				return Long.parseLong(s.trim());
+			} catch (NumberFormatException e) {
+				System.err.println("jarv: JARV_NOW is not a number");
+			}
+		}
+		return System.currentTimeMillis() / 1000L;
+	}
+
 	static int run(List<String> modes, byte[] file, PrintStream out) {
 		Zip z = new Zip(file);
 		if (z.bad()) {
 			System.err.println("jarv: " + z.error());
 			return EX_REFUSED;
 		}
+		int rc = EX_OK;
 		for (String m : modes) {
 			if (m.equals("zip")) {
 				dumpZip(z, out);
@@ -140,6 +161,12 @@ public final class Main {
 				if (!dumpSig(new Jar(z), out)) {
 					return EX_REFUSED;
 				}
+			} else if (m.equals("entries")) {
+				dumpEntries(new Verify(new Jar(z), now()), out);
+			} else if (m.equals("verify")) {
+				Verify v = new Verify(new Jar(z), now());
+				dumpVerify(v, out);
+				rc = v.exitCode();
 			} else if (m.equals("digests")) {
 				dumpDigestFacts(new Jar(z), out);
 			} else if (m.equals("digest")) {
@@ -151,7 +178,7 @@ public final class Main {
 				return EX_REFUSED;
 			}
 		}
-		return EX_OK;
+		return rc;
 	}
 
 	/**
@@ -260,6 +287,102 @@ public final class Main {
 			}
 		}
 		return allOk;
+	}
+
+	/**
+	 * The coverage table: one line per archive member, with the flags
+	 * jarsigner -verify -verbose prints in its first column so the two
+	 * can be compared per entry rather than per archive.
+	 */
+	static void dumpEntries(Verify v, PrintStream out) {
+		for (Verify.EntryState st : v.entries) {
+			StringBuilder flags = new StringBuilder();
+			if (!st.by.isEmpty()) {
+				flags.append('s');
+			}
+			if (st.inManifest) {
+				flags.append('m');
+			}
+			if (st.signable && st.by.isEmpty() && !st.inManifest) {
+				flags.append('?');
+			}
+			out.printf("entry flags=%s signable=%d manifest=%d digest=%s"
+					+ " signers=%d name=%s%n",
+				flags.length() == 0 ? "-" : flags.toString(),
+				st.signable ? 1 : 0, st.inManifest ? 1 : 0, st.digest,
+				st.by.size(), st.entry.name);
+			for (String who : st.by) {
+				out.printf("entryby %s %s%n", st.entry.name, who);
+			}
+		}
+	}
+
+	/**
+	 * The verdict, and the part of it the rest of this program exists
+	 * for: an entry that is in the archive and not in the manifest is
+	 * covered by nothing, and saying "jar verified" over one is the
+	 * silence this tool is against.
+	 */
+	static void dumpVerify(Verify v, PrintStream out) {
+		int rc = v.exitCode();
+		out.printf("jar %s%n", verdictWord(rc));
+		for (int i = 0; i < v.signers.size(); i++) {
+			Verify.Signer s = v.signers.get(i);
+			out.printf("signer %d sf=%s block=%s sig=%s link=%s expired=%d"
+					+ " notyetvalid=%d selfsigned=%d timestamped=%d chain=%d"
+					+ " covers=%d digest=%s subject=%s%n",
+				i, s.sfName, s.blockName, s.sigStatus, s.linkStatus,
+				s.expired ? 1 : 0, s.notYetValid ? 1 : 0,
+				s.selfSigned ? 1 : 0, s.timestamped ? 1 : 0, s.chain.size(),
+				s.authenticated.size(), s.digestAlg, s.subject);
+			for (int k = 0; k < s.chain.size(); k++) {
+				out.printf("chain %d %d %s%n", i, k, s.chain.get(k).subject);
+			}
+		}
+		for (Verify.EntryState st : v.entries) {
+			if (!st.signable) {
+				continue;
+			}
+			if (st.digest.equals("mismatch")) {
+				out.printf("MISMATCH %s does not digest to what the manifest"
+					+ " says%n", st.entry.name);
+			} else if (st.digest.equals("unreadable")) {
+				out.printf("UNREADABLE %s%n", st.entry.name);
+			} else if (!st.inManifest) {
+				out.printf("UNSIGNED %s is in the archive and in no"
+					+ " manifest section%n", st.entry.name);
+			} else if (st.by.isEmpty()) {
+				out.printf("UNCOVERED %s is in the manifest and no working"
+					+ " signer vouches for it%n", st.entry.name);
+			} else if (st.by.size() < v.usableSigners()) {
+				out.printf("PARTIAL %d of %d signers cover %s%n",
+					st.by.size(), v.usableSigners(), st.entry.name);
+			}
+		}
+		for (String p : v.problems) {
+			out.printf("problem %s%n", p);
+		}
+		out.printf("summary entries=%d signable=%d signed=%d partial=%d"
+				+ " unsigned=%d uncovered=%d mismatched=%d signers=%d"
+				+ " usable=%d%n",
+			v.entries.size(),
+			v.unsigned + v.uncovered + v.mismatched + v.partial
+				+ v.fullyCovered,
+			v.fullyCovered, v.partial, v.unsigned, v.uncovered, v.mismatched,
+			v.signers.size(), v.usableSigners());
+	}
+
+	static String verdictWord(int rc) {
+		if (rc == EX_OK) {
+			return "verified";
+		}
+		if (rc == EX_BAD) {
+			return "rejected";
+		}
+		if (rc == EX_UNSIGNED) {
+			return "unsigned";
+		}
+		return "refused";
 	}
 
 	/** The contentType authenticated attribute, or "-". */

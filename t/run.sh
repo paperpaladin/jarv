@@ -176,6 +176,18 @@ echo "ok   signatures: $p facts agree with openssl, $f disagree, $r refused"
 pass=$((pass + p))
 fail=$((fail + f))
 
+# ------------- oracle: jarsigner -verify -verbose, per entry and per archive
+echo "--- oracle: jarsigner -verify -verbose, the headline comparison"
+out=$(python3 "$here/jscmp.py" "$root/jarv" $jars)
+printf '%s\n' "$out" | grep -E '^(FAIL|refused)' || true
+p=$(printf '%s\n' "$out" | sed -n 's/^JSCMP_PASS //p')
+f=$(printf '%s\n' "$out" | sed -n 's/^JSCMP_FAIL //p')
+r=$(printf '%s\n' "$out" | sed -n 's/^JSCMP_REFUSED //p')
+[ -n "$p" ] || { echo "jscmp.py produced no count"; exit 2; }
+echo "ok   jarsigner: $p facts agree, $f disagree, $r refused"
+pass=$((pass + p))
+fail=$((fail + f))
+
 # ---- crafted encoded messages, signed with the corpus private key, with
 # ---- jarsigner as the oracle in both directions
 echo "--- crafted PKCS#1 encoded messages, against jarsigner"
