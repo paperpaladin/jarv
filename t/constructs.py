@@ -9,6 +9,7 @@ the suite goes red rather than quietly agreeing with itself.
 
 Exits non-zero if any construct listed as required is absent.
 """
+import hashlib
 import os
 import re
 import struct
@@ -24,6 +25,7 @@ REQUIRED = [
     "fold_continuation", "fold_space_after_marker", "fold_splits_utf8",
     "decoy_end_record", "rsa_block", "ec_block", "curve_p256", "curve_p384",
     "curve_p521", "multi_cert_block", "issuer_differs_from_subject",
+    "two_signature_files", "covered_by_one_sf_only", "stale_manifest_digest",
 ]
 
 
@@ -94,6 +96,7 @@ def main():
                     if nb.endswith(b".EC"):
                         counts["ec_block"] += 1
                     block(counts, z.read(info))
+            coverage(counts, z)
     missing = [k for k in REQUIRED if counts[k] == 0]
     for k in REQUIRED:
         print("construct %-20s %d" % (k, counts[k]))
@@ -101,6 +104,78 @@ def main():
         print("MISSING " + " ".join(missing))
         return 1
     return 0
+
+
+def coverage(counts, z):
+    """Which .SF files name which entries, read as text.
+
+    No ASN.1 and no jarv: a signature file is a manifest, and whether a
+    given entry has a section in it is a question about lines. An entry
+    named by one signature file and not by another is the partially
+    covered case, and a corpus without one cannot test it.
+    """
+    names = [i.filename for i in z.infolist()]
+    sfs = [n for n in names
+           if n.upper().startswith("META-INF/") and n.upper().endswith(".SF")
+           and "/" not in n[len("META-INF/"):]]
+    if len(sfs) < 2:
+        return
+    counts["two_signature_files"] += 1
+    sets = []
+    for sf in sfs:
+        sets.append(set(section_names(z.read(sf))))
+    union = set().union(*sets)
+    for name in union:
+        if any(name not in s for s in sets):
+            counts["covered_by_one_sf_only"] += 1
+    # A signature file whose whole-manifest digest no longer matches the
+    # manifest is the archive that forces the per-section fallback.
+    try:
+        mf = z.read("META-INF/MANIFEST.MF")
+    except KeyError:
+        return
+    for sf in sfs:
+        if not whole_manifest_matches(z.read(sf), mf):
+            counts["stale_manifest_digest"] += 1
+
+
+def section_names(raw):
+    """Values of every Name attribute, with continuation lines joined."""
+    out = []
+    for line in unfold(raw):
+        if line[:6].lower() == b"name: ":
+            out.append(line[6:].decode("utf-8", "replace"))
+    return out
+
+
+def unfold(raw):
+    lines = []
+    for phys in re.split(rb"\r\n|\n|\r", raw):
+        if phys[:1] == b" " and lines:
+            lines[-1] += phys[1:]
+        else:
+            lines.append(phys)
+    return lines
+
+
+def whole_manifest_matches(sf, mf):
+    for line in unfold(sf):
+        low = line.lower()
+        if b"-digest-manifest:" not in low or b"main-attributes" in low:
+            continue
+        alg, _, value = line.partition(b"-Digest-Manifest: ")
+        if not value:
+            continue
+        try:
+            import base64
+            want = base64.b64decode(value, validate=True)
+            got = hashlib.new(alg.decode().replace("-", "").lower(),
+                              mf).digest()
+        except Exception:
+            continue
+        if want == got:
+            return True
+    return False
 
 
 def block(counts, der):

@@ -51,7 +51,7 @@ fi
 jars=$(ls "$work"/*.jar | sort)
 njars=$(printf '%s\n' "$jars" | wc -l)
 echo "--- corpus: $njars jars in $work"
-[ "$njars" -ge 22 ] || { echo "corpus of $njars jars is too small"; exit 2; }
+[ "$njars" -ge 23 ] || { echo "corpus of $njars jars is too small"; exit 2; }
 
 # ------------------------------------------------- what the corpus contains
 # Counted with python3's zipfile and a raw byte scan, not with jarv, so that
@@ -175,6 +175,49 @@ r=$(printf '%s\n' "$out" | sed -n 's/^SIGCMP_REFUSED //p')
 echo "ok   signatures: $p facts agree with openssl, $f disagree, $r refused"
 pass=$((pass + p))
 fail=$((fail + f))
+
+# The coverage categories jarsigner's output has no word for. These are
+# asserted against expected numbers rather than against another tool,
+# because no other tool reports them; the agreement with jarsigner on
+# the verdict and on the per-entry flags is the section below. Each
+# number is one the corpus was built to produce.
+echo "--- coverage categories, which no other tool names"
+for want in \
+	"good-rsa unsigned=0 uncovered=0 mismatched=0 partial=0 signed=14" \
+	"added unsigned=1 uncovered=0 mismatched=0 partial=0 signed=14" \
+	"partial unsigned=0 uncovered=0 mismatched=0 partial=1 signed=14" \
+	"tampered unsigned=0 uncovered=0 mismatched=1 partial=0 signed=13" \
+	"sigflip unsigned=0 uncovered=14 mismatched=0 partial=0 signed=0" \
+	"unsigned unsigned=14 uncovered=0 mismatched=0 partial=0 signed=0" \
+	"two-signers unsigned=0 uncovered=0 mismatched=0 partial=0 signed=14"
+do
+	j=${want%% *}
+	line=$("$root/jarv" --verify "$work/$j.jar" | sed -n 's/^summary //p')
+	miss=""
+	for kv in ${want#* }; do
+		case " $line " in
+		*" $kv "*) ;;
+		*) miss="$miss $kv" ;;
+		esac
+	done
+	if [ -z "$miss" ]; then
+		ok "$j.jar: ${want#* }"
+	else
+		bad "$j.jar: expected$miss, got: $line"
+	fi
+done
+
+# partial.jar is also the only archive where a signature file is tied to
+# the manifest section by section rather than by one digest over the
+# whole file, because adding a member staled the first signer's
+# whole-manifest digest. Both routes have to be exercised or half of
+# Verify.link is dead code that nothing reads.
+routes=$("$root/jarv" --verify "$work/partial.jar" | sed -n 's/.* link=\([a-z]*\) .*/\1/p' | sort -u | tr '\n' ',')
+if [ "$routes" = "manifest,sections," ]; then
+	ok "partial.jar: one signer linked by the whole manifest, one by sections"
+else
+	bad "partial.jar: link routes are $routes"
+fi
 
 # ------------- oracle: jarsigner -verify -verbose, per entry and per archive
 echo "--- oracle: jarsigner -verify -verbose, the headline comparison"

@@ -133,6 +133,19 @@ cp "$w/base.jar" "$w/two-signers.jar"
 js -sigfile FIRST "$w/two-signers.jar" rsa1 >/dev/null
 js -sigfile SECOND "$w/two-signers.jar" rsa2 >/dev/null
 
+# An entry one signer covers and the other does not. Sign with rsa1,
+# add a member with jar uf, then sign with rsa2: the second jarsigner
+# run writes a manifest section for the new member and digests it in
+# its own .SF, while the first signer's .SF never mentioned it and its
+# whole-manifest digest is now stale. So the archive is signed twice
+# and one member is covered once.
+cp "$w/base.jar" "$w/partial.jar"
+js -sigfile FIRST "$w/partial.jar" rsa1 >/dev/null
+printf 'arrived between the two signatures\n' > "$w/late.txt"
+(cd "$w" && jar uf partial.jar late.txt)
+rm -f "$w/late.txt"
+js -sigfile SECOND "$w/partial.jar" rsa2 >/dev/null
+
 # ------------------------------------------- containers jarsigner cannot make
 # jarsigner rewrites the archive it signs with ZipOutputStream, so a signed
 # zip64 or stored-entry archive has to be built by rebuilding the container
