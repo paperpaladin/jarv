@@ -219,6 +219,41 @@ else
 	bad "partial.jar: link routes are $routes"
 fi
 
+# Certificate validity against a clock the suite sets. Without
+# JARV_NOW an expiry test passes today because the certificate has not
+# expired, and would pass in ten years because it has: the same green
+# line for opposite reasons. The dates themselves are compared against
+# openssl in the PKCS7 section; what is checked here is that they are
+# used.
+echo "--- certificate validity, against JARV_NOW rather than the wall clock"
+notafter=$("$root/jarv" --pkcs7 "$work/good-rsa.jar" \
+	| sed -n 's/^certnotafter [^ ]* 0 //p')
+for probe in "0 notyetvalid=1 the epoch" \
+		"4102444800 expired=1 the year 2100"; do
+	t=${probe%% *}
+	rest=${probe#* }
+	kv=${rest%% *}
+	when=${rest#* }
+	line=$(JARV_NOW=$t "$root/jarv" --verify "$work/good-rsa.jar" \
+		| sed -n 's/^signer 0 //p')
+	case " $line " in
+	*" $kv "*) ok "good-rsa.jar at $when: $kv" ;;
+	*) bad "good-rsa.jar at $when: expected $kv in: $line" ;;
+	esac
+done
+line=$("$root/jarv" --verify "$work/good-rsa.jar" | sed -n 's/^signer 0 //p')
+for kv in expired=0 notyetvalid=0; do
+	case " $line " in
+	*" $kv "*) ok "good-rsa.jar now: $kv, and notAfter is $notafter" ;;
+	*) bad "good-rsa.jar now: expected $kv in: $line" ;;
+	esac
+done
+line=$("$root/jarv" --verify "$work/expired.jar" | sed -n 's/^signer 0 //p')
+case " $line " in
+*" expired=1 "*) ok "expired.jar now: expired=1" ;;
+*) bad "expired.jar now: expected expired=1 in: $line" ;;
+esac
+
 # ------------- oracle: jarsigner -verify -verbose, per entry and per archive
 echo "--- oracle: jarsigner -verify -verbose, the headline comparison"
 out=$(python3 "$here/jscmp.py" "$root/jarv" $jars)

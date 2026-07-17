@@ -177,6 +177,33 @@ def main():
             bad("%s: jarv found %d unsigned entries and jarsigner's warning"
                 " is %s" % (base, len(unsigned), js_warns))
 
+        # jarsigner warns about an expired signer certificate and about
+        # a self-signed one, in prose below the verdict. Both are facts
+        # jarv prints on its signer line, so both can be compared.
+        expired = sum(1 for l in vtext.splitlines()
+                      if l.startswith("signer ") and " expired=1 " in l)
+        selfsigned = sum(1 for l in vtext.splitlines()
+                         if l.startswith("signer ") and " selfsigned=1 " in l)
+        # jarsigner prints its warning paragraph only after it has
+        # decided the jar verifies. When it raises a SecurityException
+        # it stops, so for a rejected archive there is nothing to
+        # compare these against and the oracle is counted as declining.
+        if not js_ok:
+            refuse("%s: jarsigner rejected before printing its warnings,"
+                   " so expiry and self-signing are not compared" % base)
+        else:
+            for what, mine, theirs_said in (
+                    ("expired", expired > 0,
+                     "signer certificate has expired" in jtext),
+                    ("self-signed", selfsigned > 0,
+                     "signer certificate is self-signed" in jtext)):
+                if mine == theirs_said:
+                    ok("%s: %s agrees with jarsigner (%s)"
+                       % (base, what, mine))
+                else:
+                    bad("%s: jarv says %s is %s and jarsigner says %s"
+                        % (base, what, mine, theirs_said))
+
         theirs = parse_jarsigner(jtext)
         ours = parse_jarv(vtext)
         if not theirs:
