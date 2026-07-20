@@ -55,6 +55,13 @@ kt -gencert -alias ca -infile "$w/leaf.csr" -outfile "$w/leaf.cer" -rfc \
 kt -exportcert -alias ca -rfc -file "$w/ca.cer" >/dev/null 2>&1
 cat "$w/leaf.cer" "$w/ca.cer" > "$w/chain.pem"
 kt -importcert -alias leaf -file "$w/chain.pem" -noprompt >/dev/null 2>&1
+# DSA is a declared non-goal. The corpus carries one anyway, because
+# the failure mode of a missing feature is not a missing error message,
+# it is quietly accepting something that looked close enough. jarsigner
+# verifies this archive and jarv has to refuse it cleanly and be
+# counted as having refused, not as having agreed.
+kt -genkeypair -alias dsa1 -keyalg DSA -keysize 2048 -sigalg SHA256withDSA \
+	-dname "CN=jarv dsa, OU=corpus, O=jarv" -validity 3650 >/dev/null 2>&1
 # Starts three years ago and lasts a day, so it is expired now. keytool will
 # happily make one; jarsigner warns when signing with it and warns again when
 # verifying, which is the second verdict the corpus needs.
@@ -122,6 +129,9 @@ js -digestalg SHA-512 -sigalg SHA512withECDSA "$w/ec521.jar" ec521 >/dev/null
 
 cp "$w/base.jar" "$w/chain.jar"
 js "$w/chain.jar" leaf >/dev/null
+
+cp "$w/base.jar" "$w/dsa.jar"
+js -sigalg SHA256withDSA "$w/dsa.jar" dsa1 >/dev/null
 
 cp "$w/base.jar" "$w/good-sha512.jar"
 js -digestalg SHA-512 -sigalg SHA512withRSA "$w/good-sha512.jar" rsa1 >/dev/null

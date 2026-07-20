@@ -51,7 +51,7 @@ fi
 jars=$(ls "$work"/*.jar | sort)
 njars=$(printf '%s\n' "$jars" | wc -l)
 echo "--- corpus: $njars jars in $work"
-[ "$njars" -ge 23 ] || { echo "corpus of $njars jars is too small"; exit 2; }
+[ "$njars" -ge 24 ] || { echo "corpus of $njars jars is too small"; exit 2; }
 
 # ------------------------------------------------- what the corpus contains
 # Counted with python3's zipfile and a raw byte scan, not with jarv, so that
@@ -217,6 +217,27 @@ if [ "$routes" = "manifest,sections," ]; then
 	ok "partial.jar: one signer linked by the whole manifest, one by sections"
 else
 	bad "partial.jar: link routes are $routes"
+fi
+
+# A declared non-goal, checked the way a non-goal has to be checked:
+# the oracle must ACCEPT the archive and jarv must refuse it cleanly.
+# The failure mode of a missing feature is not a missing error message,
+# it is quietly accepting something that looked close enough.
+"$root/jarv" --verify "$work/dsa.jar" > "$work/dsa.out" 2>&1
+rc=$?
+jarsigner -verify "$work/dsa.jar" > "$work/dsa.js" 2>&1
+if [ "$rc" = 3 ] && grep -q "^jar refused" "$work/dsa.out" \
+		&& grep -q "jar verified." "$work/dsa.js"; then
+	ok "dsa.jar: jarsigner verifies it and jarv refuses it, exit 3"
+else
+	bad "dsa.jar: jarv exit $rc, $(head -1 "$work/dsa.out")"
+fi
+# And the refusal must not be mistaken for a rejection anywhere.
+if grep -q "^UNCOVERED" "$work/dsa.out" && ! grep -q "^jar rejected" \
+		"$work/dsa.out"; then
+	ok "dsa.jar: entries reported as uncovered, archive not rejected"
+else
+	bad "dsa.jar: refusal reported as something else"
 fi
 
 # Certificate validity against a clock the suite sets. Without

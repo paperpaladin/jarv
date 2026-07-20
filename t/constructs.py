@@ -26,6 +26,7 @@ REQUIRED = [
     "decoy_end_record", "rsa_block", "ec_block", "curve_p256", "curve_p384",
     "curve_p521", "multi_cert_block", "issuer_differs_from_subject",
     "two_signature_files", "covered_by_one_sf_only", "stale_manifest_digest",
+    "dsa_block",
 ]
 
 
@@ -95,6 +96,8 @@ def main():
                         counts["rsa_block"] += 1
                     if nb.endswith(b".EC"):
                         counts["ec_block"] += 1
+                    if nb.endswith(b".DSA"):
+                        counts["dsa_block"] += 1
                     block(counts, z.read(info))
             coverage(counts, z)
     missing = [k for k in REQUIRED if counts[k] == 0]
