@@ -98,7 +98,8 @@ public final class Verify {
 			if (!st.signable) {
 				continue;
 			}
-			if (st.digest.equals("mismatch") || st.digest.equals("unreadable")) {
+			if (st.digest.equals("mismatch") || st.digest.equals("unreadable")
+					|| st.digest.equals("weak")) {
 				mismatched++;
 			} else if (!st.inManifest) {
 				unsigned++;
@@ -365,6 +366,7 @@ public final class Verify {
 			return st;
 		}
 		boolean any = false;
+		boolean strong = false;
 		st.digest = "nodigest";
 		for (String alg : ms.digestAlgorithms()) {
 			String jca = Digest.jcaName(alg);
@@ -373,6 +375,7 @@ public final class Verify {
 				continue;
 			}
 			any = true;
+			strong |= !Digest.weak(jca);
 			byte[] got = Digest.of(jca, data, 0, data.length);
 			if (got == null || !java.util.Arrays.equals(got, want)) {
 				st.digest = "mismatch";
@@ -380,6 +383,15 @@ public final class Verify {
 			}
 		}
 		if (!any) {
+			return st;
+		}
+		if (!strong) {
+			// Every digest covering this entry is one with practical
+			// collisions, so the digests match and say nothing. Refused
+			// rather than accepted, and refused rather than reported as
+			// unsigned, which is what the JDK does and which reads as
+			// "nobody signed this" when somebody did.
+			st.digest = "weak";
 			return st;
 		}
 		st.digest = "ok";
@@ -406,7 +418,8 @@ public final class Verify {
 		for (EntryState st : entries) {
 			if (st.digest.equals("mismatch")) {
 				bad = true;
-			} else if (st.digest.equals("unreadable")) {
+			} else if (st.digest.equals("unreadable")
+					|| st.digest.equals("weak")) {
 				refused = true;
 			}
 		}

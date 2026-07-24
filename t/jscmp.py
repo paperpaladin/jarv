@@ -122,7 +122,13 @@ def main():
             bad("%s: jarv could not read the archive" % base)
             continue
         js_ok = jrc == 0 and "jar verified." in jtext
-        js_unsigned = "jar is unsigned." in jtext
+        # Two different sentences mean "this archive counts as
+        # unsigned to me": one for a jar with no signature, and one for
+        # a jar signed with an algorithm the JDK has disabled. The
+        # second is a policy, and jarv answers it with a refusal rather
+        # than by copying the word.
+        js_unsigned = ("jar is unsigned." in jtext
+                       or "will be treated as unsigned" in jtext)
         js_refused = not js_ok and not js_unsigned \
             and "SecurityException" not in jtext
         verdict = ""

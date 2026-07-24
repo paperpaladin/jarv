@@ -26,7 +26,7 @@ REQUIRED = [
     "decoy_end_record", "rsa_block", "ec_block", "curve_p256", "curve_p384",
     "curve_p521", "multi_cert_block", "issuer_differs_from_subject",
     "two_signature_files", "covered_by_one_sf_only", "stale_manifest_digest",
-    "dsa_block",
+    "dsa_block", "sha1_entry_digest",
 ]
 
 
@@ -85,6 +85,8 @@ def main():
                     counts["zip64_extra"] += 1
                 if nb == b"META-INF/MANIFEST.MF":
                     counts["manifest"] += 1
+                    if re.search(rb"(?im)^SHA-?1-Digest:", z.read(info)):
+                        counts["sha1_entry_digest"] += 1
                     folds(counts, z.read(info))
                 if nb.startswith(b"META-INF/") and nb.endswith(b".SF"):
                     counts["signature_file"] += 1

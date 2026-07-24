@@ -130,6 +130,14 @@ js -digestalg SHA-512 -sigalg SHA512withECDSA "$w/ec521.jar" ec521 >/dev/null
 cp "$w/base.jar" "$w/chain.jar"
 js "$w/chain.jar" leaf >/dev/null
 
+# Entry digests in SHA-1. jarsigner still writes one and then refuses
+# to treat the result as signed, because SHA-1 is in its disabled list.
+# jarv refuses it too, for a different reason and with a different
+# word, and the two answers are recorded as a policy difference rather
+# than as an agreement.
+cp "$w/base.jar" "$w/sha1.jar"
+js -digestalg SHA-1 -sigfile SHAONE "$w/sha1.jar" rsa1 >/dev/null 2>&1
+
 cp "$w/base.jar" "$w/dsa.jar"
 js -sigalg SHA256withDSA "$w/dsa.jar" dsa1 >/dev/null
 

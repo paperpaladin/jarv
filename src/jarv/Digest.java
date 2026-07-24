@@ -129,6 +129,21 @@ public final class Digest {
 		return null;
 	}
 
+	/**
+	 * A digest nobody should be resting a signature on any more.
+	 *
+	 * MD2, MD5 and SHA-1 all have practical collisions, and a collision
+	 * in an entry digest is two files the same manifest line covers.
+	 * The JDK's answer is to treat such an archive as unsigned, which
+	 * reads as "nobody signed this" when somebody did. jarv refuses
+	 * instead and says which algorithm, and the refusal is counted as a
+	 * refusal rather than as agreement with anyone.
+	 */
+	public static boolean weak(String jca) {
+		return jca != null && (jca.equals("MD2") || jca.equals("MD5")
+			|| jca.equals("SHA-1"));
+	}
+
 	public static byte[] of(String jca, byte[] data, int off, int len) {
 		MessageDigest md = get(jca);
 		if (md == null) {

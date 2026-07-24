@@ -51,7 +51,7 @@ fi
 jars=$(ls "$work"/*.jar | sort)
 njars=$(printf '%s\n' "$jars" | wc -l)
 echo "--- corpus: $njars jars in $work"
-[ "$njars" -ge 24 ] || { echo "corpus of $njars jars is too small"; exit 2; }
+[ "$njars" -ge 25 ] || { echo "corpus of $njars jars is too small"; exit 2; }
 
 # ------------------------------------------------- what the corpus contains
 # Counted with python3's zipfile and a raw byte scan, not with jarv, so that
@@ -217,6 +217,22 @@ if [ "$routes" = "manifest,sections," ]; then
 	ok "partial.jar: one signer linked by the whole manifest, one by sections"
 else
 	bad "partial.jar: link routes are $routes"
+fi
+
+# A policy difference, written down rather than smoothed over.
+# jarsigner signs sha1.jar and then reports it as UNSIGNED, because
+# SHA-1 is in the JDK's disabled list; the signature is real and the
+# word is wrong. jarv refuses it and says which algorithm. Both halves
+# are asserted so that neither tool quietly changes its mind.
+"$root/jarv" --verify "$work/sha1.jar" > "$work/sha1.out" 2>&1
+rc=$?
+jarsigner -verify "$work/sha1.jar" > "$work/sha1.js" 2>&1
+if [ "$rc" = 3 ] && grep -q "^WEAK " "$work/sha1.out" \
+		&& grep -q "will be treated as unsigned" "$work/sha1.js"; then
+	ok "sha1.jar: jarsigner calls it unsigned, jarv refuses it, exit 3"
+else
+	bad "sha1.jar: jarv exit $rc, $(head -1 "$work/sha1.out"), jarsigner:" \
+		"$(head -1 "$work/sha1.js")"
 fi
 
 # A declared non-goal, checked the way a non-goal has to be checked:

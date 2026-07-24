@@ -348,6 +348,9 @@ public final class Main {
 					+ " says%n", st.entry.name);
 			} else if (st.digest.equals("unreadable")) {
 				out.printf("UNREADABLE %s%n", st.entry.name);
+			} else if (st.digest.equals("weak")) {
+				out.printf("WEAK %s is covered only by a digest with"
+					+ " practical collisions%n", st.entry.name);
 			} else if (!st.inManifest) {
 				out.printf("UNSIGNED %s is in the archive and in no"
 					+ " manifest section%n", st.entry.name);
