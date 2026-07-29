@@ -418,8 +418,17 @@ public final class Verify {
 		for (EntryState st : entries) {
 			if (st.digest.equals("mismatch")) {
 				bad = true;
-			} else if (st.digest.equals("unreadable")
-					|| st.digest.equals("weak")) {
+			} else if (st.digest.equals("unreadable")) {
+				// An entry the container will not produce is an entry
+				// whose digest cannot be shown to hold, and the
+				// manifest says it should. That is a rejection and not
+				// a refusal: the question was answered, badly. Saying
+				// refused here overstated what jarv did not know, and
+				// put 16 corrupted archives in the refused column of
+				// the corruption sweep while jarsigner called every one
+				// of them a digest error.
+				bad = true;
+			} else if (st.digest.equals("weak")) {
 				refused = true;
 			}
 		}

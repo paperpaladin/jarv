@@ -316,6 +316,26 @@ echo "ok   encoded messages: $p agree with jarsigner, $f disagree"
 pass=$((pass + p))
 fail=$((fail + f))
 
+# ---------------- truncation and corruption, against jarsigner
+echo "--- truncation and corruption sweep, against jarsigner"
+mkdir -p "$work/fuzz"
+out=$(python3 "$here/fuzz.py" "$root/jarv" "$work/fuzz" \
+	"$work/good-rsa.jar" "$work/good-ec.jar" "$work/zip64.jar" \
+	"$work/stored.jar" "$work/added.jar")
+printf '%s\n' "$out" | grep '^FAIL' || true
+p=$(printf '%s\n' "$out" | sed -n 's/^FUZZ_PASS //p')
+f=$(printf '%s\n' "$out" | sed -n 's/^FUZZ_FAIL //p')
+r=$(printf '%s\n' "$out" | sed -n 's/^FUZZ_REFUSED //p')
+rj=$(printf '%s\n' "$out" | sed -n 's/^FUZZ_REFUSED_JARV //p')
+ro=$(printf '%s\n' "$out" | sed -n 's/^FUZZ_REFUSED_ORACLE //p')
+m=$(printf '%s\n' "$out" | sed -n 's/^FUZZ_MATCHED //p')
+cr=$(printf '%s\n' "$out" | sed -n 's/^FUZZ_CRASH //p')
+[ -n "$p" ] || { echo "fuzz.py produced no count"; exit 2; }
+echo "ok   corruption: $p agree, $f disagree, $m both declined," \
+	"$r one declined ($rj jarv, $ro jarsigner), $cr crashes"
+pass=$((pass + p + m))
+fail=$((fail + f))
+
 echo
 echo "$pass passed, $fail failed"
 [ "$fail" -eq 0 ]
