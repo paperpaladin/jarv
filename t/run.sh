@@ -333,7 +333,12 @@ cr=$(printf '%s\n' "$out" | sed -n 's/^FUZZ_CRASH //p')
 [ -n "$p" ] || { echo "fuzz.py produced no count"; exit 2; }
 echo "ok   corruption: $p agree, $f disagree, $m both declined," \
 	"$r one declined ($rj jarv, $ro jarsigner), $cr crashes"
-pass=$((pass + p + m))
+# Every case is one check, whichever column it lands in: jarv ended in
+# one of its own exit codes and did not contradict jarsigner. Counting
+# only the agreements would make the suite total depend on which bytes
+# this run's keys happened to have, since a one-sided refusal and an
+# agreement are the same assertion passing.
+pass=$((pass + p + m + r))
 fail=$((fail + f))
 
 echo

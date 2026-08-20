@@ -75,7 +75,16 @@ mkdir -p "$c/a/b"
 printf 'alpha\n' > "$c/alpha.txt"
 printf 'beta beta beta beta beta beta beta beta beta beta\n' > "$c/beta.txt"
 printf 'nested\n' > "$c/a/b/nested.txt"
-head -c 4096 /dev/urandom > "$c/a/blob.bin"
+# Incompressible bytes, from a fixed seed rather than from urandom.
+# The deflate path needs data that does not compress, and a corpus
+# that is different every run makes the suite's own totals move for
+# reasons that are not the code. The keys still cannot be fixed, so
+# some of the signature bytes vary whatever this does.
+python3 -c "
+import random, sys
+random.seed(20261020)
+sys.stdout.buffer.write(bytes(random.randrange(256) for _ in range(4096)))
+" > "$c/a/blob.bin"
 : > "$c/empty.txt"
 
 # Names chosen to put a manifest "Name: " line on each side of the 72-byte
