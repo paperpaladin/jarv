@@ -74,6 +74,21 @@ echo "ok   container: $p facts agree with Info-ZIP, $f disagree"
 pass=$((pass + p))
 fail=$((fail + f))
 
+# -------- second opinion on the container: java.util.zip.ZipFile, which
+# -------- ships with jarsigner and so is the weakest oracle in the list
+javac -d "$work/zprobe" "$here/ZipProbe.java" 2>/dev/null || {
+	echo "could not build ZipProbe"; exit 2; }
+out=$(python3 "$here/jdkzip.py" "$root/jarv" "$work/zprobe" $jars)
+printf '%s\n' "$out" | grep -E '^(FAIL|refused)' || true
+p=$(printf '%s\n' "$out" | sed -n 's/^JDKZIP_PASS //p')
+f=$(printf '%s\n' "$out" | sed -n 's/^JDKZIP_FAIL //p')
+r=$(printf '%s\n' "$out" | sed -n 's/^JDKZIP_REFUSED //p')
+[ -n "$p" ] || { echo "jdkzip.py produced no count"; exit 2; }
+echo "ok   container, second opinion: $p facts agree with" \
+	"java.util.zip.ZipFile, $f disagree, $r refused"
+pass=$((pass + p))
+fail=$((fail + f))
+
 # -------------- oracle: coreutils base64 -d, and java.util.Base64 as a
 # -------------- second opinion, over a sweep of the padded-group alphabet
 javac -d "$work/probe" "$here/B64Probe.java" 2>/dev/null \
