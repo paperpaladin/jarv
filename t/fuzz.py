@@ -12,11 +12,12 @@ question about the same mutated file. jarv may refuse where jarsigner
 answers, and that is counted as a refusal. What it may not do is
 verify an archive jarsigner rejects, or reject one jarsigner verifies.
 
-Truncations are taken at twelfths of the file, so the end of central
-directory record, the central directory and the entry data are each
-cut in some of them. Corruptions flip the top bit of one byte at a
-stride through the file, which reaches the local headers, the entry
-data, the manifest, the signature file and the signature block.
+Truncations are taken at twelfths of the file, and so are the twelve
+corruption offsets, which reach the local headers, the entry data, the
+manifest, the signature file and the signature block. Fractions rather
+than a stride, so that the number of cases does not depend on the size
+of the archive, which depends on the keys, which are different every
+run.
 
 Five archives rather than all of them: each case costs two JVM starts
 and the suite is already a minute. They cover a plain RSA archive, an
@@ -116,8 +117,14 @@ def main():
             cut = len(raw) * num // 12
             open(path, "wb").write(raw[:cut])
             judge(jarv, path, "%s truncated to %d" % (base, cut))
-        stride = max(1, len(raw) // 12)
-        for off in range(0, len(raw), stride):
+        # Twelve offsets expressed as fractions of the file rather than
+        # a stride, so the NUMBER of cases is the same whatever size
+        # this run's keys made the archive. A stride gave twelve points
+        # for one file and thirteen for another, which moved the
+        # suite's total by one between runs of identical code. That is
+        # the second time the same shape has turned up here.
+        points = [len(raw) * i // 12 for i in range(12)]
+        for off in points:
             b = bytearray(raw)
             b[off] ^= 0x80
             open(path, "wb").write(bytes(b))
@@ -128,7 +135,7 @@ def main():
         # hole leaves the container intact and lands inside a local
         # header, an entry, the manifest, the signature file or the
         # signature block, which is where the interesting verdicts are.
-        for off in range(0, len(raw) - 16, stride):
+        for off in [min(o, len(raw) - 16) for o in points]:
             b = bytearray(raw)
             b[off:off + 16] = b"\x00" * 16
             open(path, "wb").write(bytes(b))
