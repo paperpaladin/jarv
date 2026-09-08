@@ -101,6 +101,23 @@ f=$(printf '%s\n' "$out" | sed -n 's/^B64CMP_FAIL //p')
 pass=$((pass + p))
 fail=$((fail + f))
 
+# ---- second opinion on the manifest: java.util.jar.Manifest, which is the
+# ---- parser jarsigner writes manifests with and so the authority on what a
+# ---- folded line joins back to
+javac -d "$work/mprobe" "$here/ManifestProbe.java" 2>/dev/null || {
+	echo "could not build ManifestProbe"; exit 2; }
+mkdir -p "$work/mf"
+out=$(python3 "$here/jdkmf.py" "$root/jarv" "$work/mprobe" "$work/mf" $jars)
+printf '%s\n' "$out" | grep -E '^(FAIL|refused)' || true
+p=$(printf '%s\n' "$out" | sed -n 's/^JDKMF_PASS //p')
+f=$(printf '%s\n' "$out" | sed -n 's/^JDKMF_FAIL //p')
+r=$(printf '%s\n' "$out" | sed -n 's/^JDKMF_REFUSED //p')
+[ -n "$p" ] || { echo "jdkmf.py produced no count"; exit 2; }
+echo "ok   manifest, second opinion: $p facts agree with" \
+	"java.util.jar.Manifest, $f disagree, $r refused"
+pass=$((pass + p))
+fail=$((fail + f))
+
 # ---------------- oracle: coreutils digests, coreutils base64, jarsigner's
 # ---------------- own numbers in the .SF for the manifest byte ranges
 echo "--- oracle: coreutils sha*sum and base64, and jarsigner's .SF values"
