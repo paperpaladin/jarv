@@ -409,7 +409,15 @@ public final class Verify {
 		boolean bad = false;
 		for (Signer s : signers) {
 			if (s.sigStatus.startsWith("refused")) {
-				refused = true;
+				// A signature file jarv cannot read is a refusal only
+				// when nothing else in the archive works. An archive
+				// with a working signature and a stray unparsable
+				// signature file beside it is one jarsigner verifies,
+				// with a warning naming the file, and refusing it
+				// outright would be a disagreement about an entry that
+				// covers nothing. The stray file is reported as a
+				// problem either way.
+				refused |= usableSigners() == 0;
 			} else if (!s.sigStatus.equals("ok")
 					|| s.linkStatus.startsWith("bad")) {
 				bad = true;

@@ -51,7 +51,7 @@ fi
 jars=$(ls "$work"/*.jar | sort)
 njars=$(printf '%s\n' "$jars" | wc -l)
 echo "--- corpus: $njars jars in $work"
-[ "$njars" -ge 25 ] || { echo "corpus of $njars jars is too small"; exit 2; }
+[ "$njars" -ge 26 ] || { echo "corpus of $njars jars is too small"; exit 2; }
 
 # ------------------------------------------------- what the corpus contains
 # Counted with python3's zipfile and a raw byte scan, not with jarv, so that
@@ -249,6 +249,35 @@ if [ "$routes" = "manifest,sections," ]; then
 	ok "partial.jar: one signer linked by the whole manifest, one by sections"
 else
 	bad "partial.jar: link routes are $routes"
+fi
+
+# Where a signature file may live. META-INF/X.SF is machinery;
+# META-INF/sub/X.SF is one level too deep and is an ordinary member
+# that a signature has to cover like any other; meta-inf/X.SF differs
+# only in the case of the directory and is machinery again. Both tools
+# are asked and both have to say the same thing.
+"$root/jarv" --verify "$work/metainf.jar" > "$work/mi.out" 2>&1
+rc=$?
+jarsigner -verify -verbose "$work/metainf.jar" > "$work/mi.js" 2>&1
+if [ "$rc" = 0 ] && grep -q "^jar verified" "$work/mi.out" \
+		&& grep -q "jar verified." "$work/mi.js"; then
+	ok "metainf.jar: both verify it"
+else
+	bad "metainf.jar: jarv exit $rc, $(head -1 "$work/mi.out")"
+fi
+if grep -q "^UNSIGNED META-INF/sub/FAKE.SF" "$work/mi.out" \
+		&& grep -qE "^ *\? .*META-INF/sub/FAKE.SF" "$work/mi.js"; then
+	ok "metainf.jar: a .SF one level deep is an unsigned ordinary entry" \
+		"to both"
+else
+	bad "metainf.jar: META-INF/sub/FAKE.SF classified differently"
+fi
+if grep -q "^problem meta-inf/EXTRA.SF has no" "$work/mi.out" \
+		&& grep -q "Unparsable signature-related file meta-inf/EXTRA.SF" \
+			"$work/mi.js"; then
+	ok "metainf.jar: meta-inf/EXTRA.SF is machinery to both, named by both"
+else
+	bad "metainf.jar: meta-inf/EXTRA.SF classified differently"
 fi
 
 # A policy difference, written down rather than smoothed over.

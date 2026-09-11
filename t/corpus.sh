@@ -211,5 +211,16 @@ $M drop "$w/good-rsa.jar" "$w/dropped.jar" beta.txt
 # and nothing else.
 $M bitflip "$w/good-rsa.jar" "$w/sigflip.jar" META-INF/RSA1.RSA -1
 
+# The two rules about where a signature file lives, which the spec
+# states and which nothing was testing. META-INF/sub/FAKE.SF is one
+# level too deep and is an ordinary archive member; meta-inf/EXTRA.SF
+# differs only in the case of the directory and is signature
+# machinery, which is what both jarv and the JDK conclude.
+printf 'one level too deep to be signature machinery\n' \
+	| $M add "$w/good-rsa.jar" "$w/mi1.jar" "META-INF/sub/FAKE.SF"
+printf 'a signature file with no block beside it\n' \
+	| $M add "$w/mi1.jar" "$w/metainf.jar" "meta-inf/EXTRA.SF"
+rm -f "$w/mi1.jar"
+
 rm -f "$w/base.jar"
 echo "corpus in $w"
