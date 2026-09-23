@@ -32,6 +32,19 @@ fail=0
 ok()  { pass=$((pass+1)); printf 'ok   %s\n' "$*"; }
 bad() { fail=$((fail+1)); printf 'FAIL %s\n' "$*"; }
 
+# JARV_SKIP names sections to leave out. It exists for the mutation
+# harness, which runs this script once per mutant and spends most of
+# its time in the two slowest sections. Skipping them can only turn a
+# kill into a survivor, never the other way round, so the harness
+# re-runs every survivor with nothing skipped before reporting it. An
+# ordinary run skips nothing.
+skip() {
+	case " ${JARV_SKIP:-} " in
+	*" $1 "*) return 0 ;;
+	*) return 1 ;;
+	esac
+}
+
 [ -f "$root/build/jarv/Main.class" ] || { echo "no build; run make"; exit 2; }
 newest=$(ls -t "$root"/src/jarv/*.java | head -1)
 [ "$newest" -nt "$root/build/jarv/Main.class" ] && {
@@ -76,6 +89,9 @@ fail=$((fail + f))
 
 # -------- second opinion on the container: java.util.zip.ZipFile, which
 # -------- ships with jarsigner and so is the weakest oracle in the list
+if skip jdkzip; then
+	echo "--- java.util.zip.ZipFile second opinion: skipped by JARV_SKIP"
+else
 javac -d "$work/zprobe" "$here/ZipProbe.java" 2>/dev/null || {
 	echo "could not build ZipProbe"; exit 2; }
 out=$(python3 "$here/jdkzip.py" "$root/jarv" "$work/zprobe" $jars)
@@ -88,6 +104,7 @@ echo "ok   container, second opinion: $p facts agree with" \
 	"java.util.zip.ZipFile, $f disagree, $r refused"
 pass=$((pass + p))
 fail=$((fail + f))
+fi
 
 # -------------- oracle: coreutils base64 -d, and java.util.Base64 as a
 # -------------- second opinion, over a sweep of the padded-group alphabet
@@ -378,6 +395,9 @@ pass=$((pass + p))
 fail=$((fail + f))
 
 # ---------------- truncation and corruption, against jarsigner
+if skip fuzz; then
+	echo "--- truncation and corruption sweep: skipped by JARV_SKIP"
+else
 echo "--- truncation and corruption sweep, against jarsigner"
 mkdir -p "$work/fuzz"
 out=$(python3 "$here/fuzz.py" "$root/jarv" "$work/fuzz" \
@@ -401,6 +421,7 @@ echo "ok   corruption: $p agree, $f disagree, $m both declined," \
 # agreement are the same assertion passing.
 pass=$((pass + p + m + r))
 fail=$((fail + f))
+fi
 
 echo
 echo "$pass passed, $fail failed"

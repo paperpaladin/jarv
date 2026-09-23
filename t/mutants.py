@@ -162,8 +162,21 @@ def run(cmd, env=None, cwd=ROOT):
                           stderr=subprocess.STDOUT)
 
 
-def suite(env):
-    p = run(["./t/run.sh"], env=env)
+# The two slowest sections, left out of the first pass. Skipping them
+# can only turn a kill into a survivor, never the other way round, so
+# every survivor is re-run with nothing skipped before it is reported.
+# The first pass is about half the time of a full one and most mutants
+# die in it.
+SKIP = "fuzz jdkzip"
+
+
+def suite(env, skip=None):
+    e = dict(env)
+    if skip:
+        e["JARV_SKIP"] = skip
+    else:
+        e.pop("JARV_SKIP", None)
+    p = run(["./t/run.sh"], env=e)
     out = p.stdout.decode("utf-8", "replace")
     m = re.search(r"^(\d+) passed, (\d+) failed$", out, re.M)
     if not m:
@@ -230,7 +243,7 @@ def main():
                 print("NOBUILD %s" % label)
                 survivors.append(label + " (does not compile)")
                 continue
-            p, f, _ = suite(env)
+            p, f, _ = suite(env, SKIP)
             if f is None:
                 print("KILLED  %s (the suite refused to run)" % label)
                 killed += 1
@@ -238,8 +251,21 @@ def main():
                 print("KILLED  %s (%d failed)" % (label, f))
                 killed += 1
             else:
-                print("SURVIVOR %s" % label)
-                survivors.append(label)
+                # Nothing in the fast pass saw it. Ask the whole suite
+                # before writing it down as a survivor, because a
+                # survivor is a claim about what the suite cannot see
+                # and this one has only been shown half of it.
+                p, f, _ = suite(env)
+                if f is None:
+                    print("KILLED  %s (the suite refused to run)" % label)
+                    killed += 1
+                elif f > 0:
+                    print("KILLED  %s (%d failed, only by a skipped section)"
+                          % (label, f))
+                    killed += 1
+                else:
+                    print("SURVIVOR %s" % label)
+                    survivors.append(label)
         finally:
             _restore()
     run(["make", "-s"])
