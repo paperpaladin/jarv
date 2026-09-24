@@ -189,6 +189,15 @@ Added while working, none of them planned:
   with itself and the corpus can show it.
 - [x] an archive one signer covers and another does not
   why: coverage is a set per entry and nothing was testing the set.
+- [x] `java.util.jar.Manifest` as a second manifest opinion
+  why: the 72-byte fold is the rule readers get wrong and the corpus
+  had the folds with nothing to check the answer against.
+- [x] an archive carrying a `.SF` one level too deep and one whose
+  directory differs only in case
+  why: two placement rules in Jar.java that nothing could reach.
+- [x] two-stage mutation runs
+  why: a full sweep at three and a half minutes a mutant is three
+  hours, which means it does not get run.
 
 ## Still open
 
