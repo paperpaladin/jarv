@@ -6,3 +6,14 @@ t/tmp*/
 *.jks
 *.p12
 *.keystore
+__pycache__/
+
+# Run logs a suite or a mutation sweep leaves behind. Named here because
+# `cq c` stages the whole tree, so anything not listed is committed, and
+# a dotfile is easy to miss in `git status` output that is already long.
+.buildall.out
+.jscmp.out
+.mutants.out
+.refbuild
+.suite.out
+.workdir

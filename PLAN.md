@@ -34,13 +34,15 @@ Ranked by how little we control them.
    `openssl ecparam -param_enc explicit` for the curve constants, and
    `openssl pkeyutl -verifyrecover` for what an RSA signature decrypts
    to, which is the one question that reaches the padding on its own.
-4. `jarsigner -verify -verbose -certs` and `keytool -printcert`. Same vendor
-   as the library we are replacing, so the weakest of the four in principle,
-   and the only one that knows what a JAR signature means. Its verdict is the
-   headline number anyway because nothing else gives one.
-5. `java.util.zip.ZipFile` read through a tiny helper, as a second opinion on
-   the container only. Named here so it is not mistaken for an independent
-   authority: it ships with jarsigner.
+4. `jarsigner -verify -verbose` and `keytool -printcert -jarfile`. Same
+   vendor as the library we are replacing, so the weakest of the four in
+   principle, and the only one that knows what a JAR signature means. Its
+   verdict is the headline number anyway because nothing else gives one.
+   This entry used to say `-certs` as well and nothing ever passed it.
+5. `java.util.zip.ZipFile` and `java.util.jar.Manifest`, each read through a
+   tiny helper, as a second opinion on the container and on the manifest.
+   Named here so they are not mistaken for independent authorities: both
+   ship with jarsigner. Neither is asked anything about a signature.
 
 ## Non-goals
 

@@ -38,8 +38,8 @@ make mutants    # the mutation harness
 ```
 
 Modes: `--zip`, `--manifest`, `--digest`, `--digests`, `--der`, `--pkcs7`,
-`--sig`, `--curves`, `--entries`, `--verify`. Everything but the last two is
-there so an outside tool can be asked the same question.
+`--sig`, `--b64`, `--curves`, `--entries`, `--verify`. Everything but the
+last two is there so an outside tool can be asked the same question.
 
 Exit codes: 0 verified, 1 unsigned, 2 rejected, 3 refused, 4 unusable input.
 A refusal is never a rejection and the two never share a code.
@@ -68,14 +68,21 @@ the JDK.
 coreutils, and python3's `hashlib` and `zipfile` inside the comparison
 scripts, for digests and for reading archives without jarv.
 
-`jarsigner -verify -verbose -certs` and `keytool -printcert -jarfile`. Same
-vendor as the library being replaced, so the weakest in principle, and the
-only one that knows what a JAR signature means. Its verdict is the headline
-number because nothing else produces one.
+`jarsigner -verify -verbose` and `keytool -printcert -jarfile`. Same vendor
+as the library being replaced, so the weakest in principle, and the only one
+that knows what a JAR signature means. Its verdict is the headline number
+because nothing else produces one. This line used to say `-certs` as well.
+It never did: `-certs` adds a certificate dump under each entry and nothing
+here reads it, because `keytool -printcert -jarfile` is the certificate
+oracle and `openssl pkcs7 -print` is the one behind that.
 
 `java.util.zip.ZipFile` through a 55-line helper, as a second opinion on the
-container only. It ships with `jarsigner`, so it is named here to keep it
-from being mistaken for an independent authority.
+container only, and `java.util.jar.Manifest` through another as a second
+opinion on the manifest. Both ship with `jarsigner`, so they are named here
+to keep them from being mistaken for independent authorities. The manifest
+one is the parser `jarsigner` writes manifests with, which makes it the
+authority on what a 72-byte fold joins back to, and it is asked nothing
+about signatures.
 
 Python's own RSA arithmetic, `pow(m, d, n)` over the modulus and private
 exponent that `openssl rsa -text` prints, for crafting signatures over
@@ -86,40 +93,55 @@ crafting out of the openssl code that then judges the result.
 
 ## The numbers
 
-Measured by `make test` on 2026-10-21. Every number below is printed by the
-suite; the block is its own output, not a transcription.
+Measured by `make test` on 21 October 2026. Every number below is a line the
+suite printed, wrapped to fit.
 
 ```
-ok   container: 5221 facts agree with Info-ZIP, 0 disagree
-ok   container, second opinion: 2546 facts agree with java.util.zip.ZipFile,
+ok   container: 5459 facts agree with Info-ZIP, 0 disagree
+ok   container, second opinion: 2657 facts agree with java.util.zip.ZipFile,
      0 disagree, 1 refused
 ok   base64: 149 strings, 29 accepted and 120 rejected by both
 ok   base64: 37 of 149 agree with java.util.Base64, 112 refused by jarv and
      accepted by it, 0 the other way
+ok   manifest, second opinion: 908 facts agree with java.util.jar.Manifest,
+     0 disagree, 1 refused
 ok   manifest: 811 facts agree, 0 disagree
-ok   DER: 2876 node facts agree with openssl asn1parse, 0 disagree
+ok   DER: 2985 node facts agree with openssl asn1parse, 0 disagree
 ok   DER cases: 13 agree with openssl asn1parse, 7 refused by jarv as BER
      and accepted by openssl
-ok   PKCS7: 627 facts agree with openssl and keytool, 0 disagree,
+ok   PKCS7: 651 facts agree with openssl and keytool, 0 disagree,
      3 refused by the oracle
 ok   curves: 21 constants agree with openssl ecparam, 0 disagree
-ok   signatures: 143 facts agree with openssl, 0 disagree, 2 refused
-ok   jarsigner: 905 facts agree, 0 disagree, 11 refused
+ok   signatures: 149 facts agree with openssl, 0 disagree, 2 refused
+ok   jarsigner: 955 facts agree, 0 disagree, 11 refused
 ok   encoded messages: 30 agree with jarsigner, 0 disagree
-ok   corruption: 63 agree, 0 disagree, 88 both declined,
+ok   corruption: 64 agree, 0 disagree, 83 both declined,
      28 one declined (11 jarv, 17 jarsigner), 0 crashes
 
-13551 passed, 0 failed
+14996 passed, 0 failed
 ```
 
-The headline is the `jarsigner` line. 905 facts over 25 archives, compared
-per entry rather than per archive wherever `jarsigner` prints something per
-entry: for each member, whether it is listed in the manifest, whether a
-signature was verified for it, and whether it is marked unsigned; for each
-archive, the verdict, jarv's own exit code against its own printed verdict,
-whether any signer certificate has expired, whether any is self-signed, and
-whether there are members nothing signed. Zero disagreements in either
-direction, which is the invariant in PLAN.md.
+The headline is the `jarsigner` line: 955 facts over 26 archives, zero
+disagreements in either direction, which is the invariant in PLAN.md. What
+those 955 are:
+
+- 849 per-entry flags, three for each of 283 members. `jarsigner -verbose`
+  prints a flag column per member, and the three letters that mean anything
+  without a keystore are compared one at a time: `m` for listed in the
+  manifest, `s` for a signature verified, `?` for unsigned.
+- 23 archive verdicts. 19 both accept, 3 both reject, and `unsigned.jar`
+  which both call unsigned. The count matters in both directions: an
+  archive jarv accepts and `jarsigner` rejects is a failure, and so is the
+  reverse, whichever of the two is right about the specification.
+- 23 exit codes, each checked against jarv's own printed verdict rather
+  than against `jarsigner`, since nothing outside jarv defines them.
+- 22 comparisons of whether there are members nothing signed. This is the
+  warning paragraph `jarsigner` prints under `jar verified.`, and it is the
+  thing the project was written for.
+- 38 certificate flags, expiry and self-signing, over the 19 archives where
+  `jarsigner` got far enough to print them. One certificate in the corpus
+  has expired and one chain is not self-signed; the other 18 of each pair
+  are the ordinary answer and `jarsigner` agrees on all 38.
 
 Refusals are counted apart from agreements everywhere, and a refusal is
 never scored as agreement with anybody. The ones in the run above:
@@ -131,7 +153,7 @@ never scored as agreement with anybody. The ones in the run above:
   partway through. One is `zip64-dd.jar`, which it will not open at all. One
   is `dsa.jar`, which jarv refuses by design. One is `sha1.jar`, where the
   two tools disagree about the word rather than the outcome. And one counts
-  the 116 entries that are the manifest, the signature files, the signature
+  the 123 entries that are the manifest, the signature files, the signature
   blocks and the directories, which `jarsigner` flags by a rule about the
   JarFile API rather than about a digest.
 - 7 in the DER cases: BER encodings that `openssl asn1parse` accepts and
@@ -143,6 +165,9 @@ never scored as agreement with anybody. The ones in the run above:
   `zipfile` will not open because of the decoy end records.
 - 1 in the second container opinion: `zip64-dd.jar` again, which
   `java.util.zip.ZipFile` reads and `jarsigner` does not.
+- 1 in the second manifest opinion: `decoy.jar`, whose manifest the probe
+  never sees, because python3's `zipfile` finds a decoy end record and will
+  not open the archive to hand it over.
 - 112 base64 strings jarv refuses and `java.util.Base64` accepts, all of
   them crafted, none of them in any archive.
 
@@ -158,24 +183,32 @@ Counted by `t/constructs.py` with python3's `zipfile`, a raw byte scan and
 `openssl`, never by jarv, so a construct jarv cannot see reads as zero here
 and turns the suite red. The suite refuses to run if any of these is absent.
 
+Two of the numbers do not add up at first reading and both are correct.
+There are 26 archives and 25 manifests, because python3's `zipfile` is
+fooled by the decoy end records and will not open `decoy.jar`, so nothing
+inside it is counted; the counts that come from the raw byte scan, archives
+and signature blocks among them, do include it. And there are 27 signature
+files to 26 blocks, because `metainf.jar` carries a `.SF` with no block
+beside it on purpose.
+
 ```
-archives             25     fold_continuation    424
-entries             483     fold_space_after_marker 23
-zip64_eocd            3     fold_splits_utf8      23
+archives             26     fold_continuation    443
+entries             505     fold_space_after_marker 24
+zip64_eocd            3     fold_splits_utf8      24
 zip64_extra          80     decoy_end_record       1
-data_descriptor     307     rsa_block             21
-no_data_descriptor  176     ec_block               3
-stored              128     dsa_block              1
-deflated            355     curve_p256             1
-empty_entry          24     curve_p384             1
-directory            72     curve_p521             1
+data_descriptor     325     rsa_block             22
+no_data_descriptor  180     ec_block               3
+stored              132     dsa_block              1
+deflated            373     curve_p256             1
+empty_entry          25     curve_p384             1
+directory            75     curve_p521             1
 archive_comment       2     multi_cert_block       1
-utf8_flag           483     issuer_differs_from_subject 1
-non_ascii_name       48     two_signature_files    2
-name_over_72        120     covered_by_one_sf_only 1
-name_exactly_72      24     stale_manifest_digest  1
-signature_block      25     sha1_entry_digest      1
-signature_file       25     manifest              24
+utf8_flag           505     issuer_differs_from_subject 1
+non_ascii_name       50     two_signature_files    3
+name_over_72        125     covered_by_one_sf_only 15
+name_exactly_72      25     stale_manifest_digest  2
+signature_block      26     sha1_entry_digest      1
+signature_file       27     manifest              25
 ```
 
 The archives, and what each is for:
@@ -213,6 +246,9 @@ The archives, and what each is for:
 - `decoy`: two more things that look like an end of central directory
   record, one inside a stored entry before the real one and one in the
   archive comment after it.
+- `metainf`: a `.SF` one level too deep in `META-INF`, which is an ordinary
+  member, and one whose directory differs only in case, which is signature
+  machinery. Both tools classify both the same way and both name both.
 
 Manifest constructs are built deliberately rather than hoped for. Entry
 names are chosen so that a `Name: ` line lands at 62, 65, 66, 67, 68 and 72
@@ -237,17 +273,33 @@ certificate to the block, and jarv is in that position today.
 Timestamps are reported and not checked. An RFC 3161 token in the
 unauthenticated attributes is counted and its presence printed. Nothing
 reads it. This means jarv cannot tell a signature made before a certificate
-expired from one made after.
+expired from one made after. The reporting half has never been seen to say
+yes, either: every signer in the corpus prints `timestamped=0`, because
+`jarsigner -tsa` wants a timestamp authority over the network and nothing
+here reaches one. So the flag is a line of output with no case behind it,
+which is a weaker claim than the rest of this README makes.
 
 There is no revocation checking: no CRL, no OCSP.
 
-DSA is refused rather than verified. That is deliberate and it is asserted: the corpus has a
-DSA archive, `jarsigner` verifies it, and jarv is required to refuse it
-cleanly and be counted as having refused.
+DSA is refused rather than verified. That is deliberate and it is asserted:
+the corpus has a DSA archive, `jarsigner` verifies it, and jarv is required
+to refuse it cleanly and be counted as having refused.
 
 Five mutants survive. Each is a rule in the code that nothing in the
 corpus can make fail, and each is here with the reason rather than with a
 plan to get to it.
+
+How those were measured is worth stating, because the number would mean
+something different otherwise. `t/mutants.py` holds 57 single-edit mutants
+and runs the whole suite against each. Every mutant added while this was
+being built was run individually at the time it was written, against the
+suite as it stood, and the five below are the ones that did not die. A
+single sweep of all 57 in one sitting has not been completed: the suite is
+three and a half minutes and this machine was running two other
+repositories' sweeps at the same time, which puts one pass over three
+hours. What has been run end to end is the manifest group, reported below.
+Anything claiming to be a survivor has been run against the full suite with
+nothing skipped.
 
 - The ECDSA digest truncated by byte length rather than by bit length. Over
   the three curves and the five SHA digests in use the two never differ.
@@ -285,22 +337,30 @@ is BER with the ambiguity removed and a signature is a claim about one
 sequence of bytes. `openssl asn1parse` accepts all seven. Those are counted
 as refusals, not as agreements, and nothing the JDK writes contains one.
 
-Base64 is stricter than both of its oracles, and that costs something.
-`java.util.Base64` decodes `AB==` to one zero byte, dropping the low two
-bits, which gives 64 spellings of one value; jarv accepts only `AA==`.
-Since `jarsigner` uses `java.util.Base64`, a manifest crafted that way
-verifies for `jarsigner` and is refused by jarv. 112 of 149 probe strings
-are refused by jarv and accepted by the JDK for that reason. They are
-counted as refusals. No corpus archive contains one, so this is a
-difference on crafted input only.
+Base64 is stricter than both of its oracles, and that costs something. A
+padded group carries bits that no output byte uses, and `java.util.Base64`
+ignores them rather than requiring them to be zero. `AB==` decodes to one
+zero byte, as do the other fifteen spellings `Ax==` can take, and `AAx=`
+gives four spellings of two zero bytes; jarv accepts only `AA==` and `AAA=`.
+Both figures were counted by running the 64 alphabet characters through
+`java.util.Base64` rather than worked out from the encoding, because this
+README said 64 spellings for some time and the number is 16. Since
+`jarsigner` uses `java.util.Base64`, a manifest crafted that way verifies
+for `jarsigner` and is refused by jarv. 112 of 149 probe strings are refused
+by jarv and accepted by the JDK for that reason. They are counted as
+refusals. No corpus archive contains one, so this is a difference on crafted
+input only.
 
 The suite's total is stable and the per-column numbers in the corruption
 sweep are not. The keys cannot be fixed, because nothing here may commit
 one, so which column a corrupted archive lands in moves a little from run
-to run. Every case counts as one assertion whichever column it lands in,
-which is why the total does not move. An earlier version counted only the
-agreements and the total drifted by three between two runs of identical
-code.
+to run. The sweep is 35 cases over each of five archives, 175 in all: 11
+truncations, 12 single-bit flips and 12 sixteen-byte holes, every offset a
+twelfth of the file rather than a step of a fixed size. So the number of
+cases does not depend on how big this run's keys made the archive, and
+every case counts as one assertion whichever column it lands in. Both of
+those were defects before they were properties, and both produced a green
+suite whose number was not reproducible.
 
 `java.util.zip` is used for two things: `Inflater` for method 8 and
 `CRC32` for the check. Writing a deflate decoder was not the point of this
@@ -325,8 +385,8 @@ means indexing certificates by their key identifier extension, which jarv
 does not do. Nothing the JDK produces uses that form.
 
 A block with more than one SignerInfo is refused. Several signers behind
-one `.SF` would make the coverage
-table ambiguous about which signer a `.SF` belongs to. Refused.
+one `.SF` would leave the coverage table unable to say which signer a given
+entry belongs to.
 
 ## Defects found in the harness, not in the code
 
@@ -364,12 +424,6 @@ is meaningless for an archive whose signature is deliberately broken: the
 rejection has two causes and they are indistinguishable from outside. It
 reported that jarv had the signed bytes wrong for `sigflip.jar`.
 
-48 rejections were being reported as refusals. An entry the container will
-not decompress is an entry whose digest cannot be shown to hold, and the
-manifest says it should: that is an answer, not a declining to answer.
-`jarsigner` calls every one of them a digest error. The corruption sweep
-went from 20 agreements to 68.
-
 Three warnings were compared against archives where the oracle never printed
 them. `jarsigner` prints its warning paragraph only after deciding a jar
 verifies, so for a rejected archive there is nothing to compare the expiry
@@ -379,11 +433,34 @@ harness was wrong to call them disagreements.
 The expected disagreement was not the one that existed. `jdkzip.py` was
 written to assert that `java.util.zip.ZipFile` refuses at least one archive,
 on the strength of `jarsigner` refusing `zip64-dd.jar`. `ZipFile` opens all
-25. The refusal lives in the streaming reader `jarsigner` uses, not in the
-random-access one, so the two halves of one library answer differently about
-the same file.
+of them. The refusal lives in the streaming reader `jarsigner` uses, not in
+the random-access one, so the two halves of one library answer differently
+about the same file.
+
+The suite total was not reproducible, twice, for two reasons one commit
+apart. First the corruption sweep counted only the cases where both tools
+judged and agreed, so a case moving between columns took a point with it,
+and which column a case lands in depends on bytes of a key generated fresh
+every run. Then, with the counting fixed, the offsets themselves were taken
+by stepping a stride of `len/12` through each archive, which gives twelve
+points for one length and thirteen for another. The shape is worth naming
+rather than the instance: any count derived from a stride over data whose
+length is not fixed is a count that moves.
 
 ## Defects found in jarv
+
+jarv refused an archive `jarsigner` verifies. An unparsable signature file
+with no block beside it made a signer jarv could not use, and the whole
+archive was refused on the strength of it. `jarsigner` is right: a stray
+signature file covers nothing, and refusing an archive whose real signature
+is intact because of an entry that claims nothing is the wrong answer. A
+signer refusal refuses the archive only when no signer works at all.
+
+48 rejections were reported as refusals. An entry the container will not
+decompress is an entry whose digest cannot be shown to hold while the
+manifest says it should, which is an answer rather than a declining to
+answer. The corruption sweep went from 20 agreements to 68 when that was
+corrected.
 
 The P-521 group order was wrong. Fourteen extra `ff` bytes, 160 hex digits
 where the standard has 132, typed in by hand and read by nothing that could
@@ -400,11 +477,18 @@ never differ, because P-521 is the only curve whose order is not a whole
 number of bytes and no digest reaches its 66. The comment was written from
 the shape of the rule rather than from the arithmetic.
 
+## Reproducibility
+
+Every commit builds, and that is measured rather than assumed. `cq b jarv`
+creates a fresh git worktree per commit, reads the Makefile as it was at
+that commit and builds the default target there. The last full run was 40
+of 40, taken at the commit before this paragraph was written.
+
 ## Layout
 
 ```
-src/jarv/     4039 lines of Java, 17 files, no dependency
-t/            4129 lines of harness, python3 standard library only
+src/jarv/     4047 lines of Java, 17 files, no dependency
+t/            4459 lines of harness, python3 and three short Java probes
 t/corpus.sh   builds the corpus from keytool, jar, jarsigner and mkzip.py
 t/mutants.py  the mutation harness
 ```
