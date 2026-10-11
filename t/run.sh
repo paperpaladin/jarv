@@ -423,6 +423,24 @@ pass=$((pass + p + m + r))
 fail=$((fail + f))
 fi
 
+# The mutation table, checked for rot rather than run.
+#
+# The sweep is a separate target because 47 mutants against a three and a
+# half minute suite is over three hours, and the README records that one
+# pass in a single sitting has never been completed. That is the honest
+# position, and it means nothing asks between sweeps whether the table still
+# applies to the source. An entry whose pattern has been refactored away is
+# neither killed nor surviving: it does nothing, and the score covers a
+# smaller table than it names.
+echo "--- the mutation table"
+if mout=$(python3 t/mutants.py --check 2>&1); then
+	pass=$((pass + 1)); echo "ok   $mout"
+else
+	fail=$((fail + 1))
+	echo "FAIL a mutation pattern no longer applies, so the table tests less than it says"
+	echo "$mout" | sed 's/^/     /'
+fi
+
 echo
 echo "$pass passed, $fail failed"
 [ "$fail" -eq 0 ]

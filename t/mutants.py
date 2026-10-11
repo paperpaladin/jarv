@@ -226,14 +226,25 @@ def main():
     print("baseline: %d passed, 0 failed" % base_pass)
     killed = 0
     survivors = []
+    stale = []
     for label, fname, before, after in MUTANTS:
         if only and only not in label:
             continue
         path = os.path.join(ROOT, "src", "jarv", fname)
         orig = open(path).read()
-        if before not in orig:
-            print("BROKEN  %s: the pattern is not in %s" % (label, fname))
-            survivors.append(label + " (pattern missing)")
+        # Counted apart from a survivor, and by occurrences rather than by
+        # membership. The two are different failures and want different
+        # work: a survivor is a claim about what the suite cannot see, and
+        # a missing pattern is no mutation at all, so filing one as the
+        # other overstates the gap in the tests and understates the rot in
+        # this table. `in` also accepted a pattern appearing twice, which
+        # would have mutated the first occurrence rather than the one the
+        # entry names.
+        n = orig.count(before)
+        if n != 1:
+            print("STALE   %s: the pattern appears %d times in %s, not once"
+                  % (label, n, fname))
+            stale.append("%s (%d occurrences in %s)" % (label, n, fname))
             continue
         _PENDING[path] = orig
         open(path, "w").write(orig.replace(before, after, 1))
@@ -269,15 +280,54 @@ def main():
         finally:
             _restore()
     run(["make", "-s"])
-    n = killed + len(survivors)
+    n = killed + len(survivors) + len(stale)
     print("")
-    print("%d mutants, %d killed, %d survived" % (n, killed, len(survivors)))
+    print("%d mutants, %d killed, %d survived, %d did not apply"
+          % (n, killed, len(survivors), len(stale)))
     for s in survivors:
         print("  survivor: " + s)
+    for s in stale:
+        print("  stale: " + s)
+    if stale:
+        print("  a mutation whose pattern no longer matches tests nothing,"
+              " so this table covers %d of %d entries"
+              % (killed + len(survivors), n))
     if tmp:
         import shutil
         shutil.rmtree(tmp)
     return 0
 
 
-sys.exit(main())
+def check():
+    """Every entry's pattern appears exactly once in the file it names.
+
+    The sweep asks this per mutant, in a run the README records as never
+    having completed in one sitting: 47 mutants against a three and a half
+    minute suite is over three hours. So between sweeps nothing asks it, and
+    an entry whose pattern has been refactored away is neither killed nor
+    surviving. This asks it about all of them in under a second.
+    """
+    bad = []
+    for label, fname, before, _after in MUTANTS:
+        orig = open(os.path.join(ROOT, "src", "jarv", fname)).read()
+        n = orig.count(before)
+        if n != 1:
+            bad.append((label, fname, n, before.strip()[:56]))
+    for label, fname, n, snip in bad:
+        print("STALE %-34s %s: appears %d times, not once: %s"
+              % (label, fname, n, snip))
+    if bad:
+        print("mutants: %d of %d entries no longer apply to the source"
+              % (len(bad), len(MUTANTS)))
+        return 1
+    print("mutants: %d entries, every pattern applies exactly once"
+          % len(MUTANTS))
+    return 0
+
+
+# Guarded, so this file can be imported to read its table. Without it,
+# importing the module to count MUTANTS started the whole sweep.
+if __name__ == "__main__":
+    if "--check" in sys.argv:
+        sys.exit(check())
+    sys.exit(main())

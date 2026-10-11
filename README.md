@@ -290,11 +290,21 @@ corpus can make fail, and each is here with the reason rather than with a
 plan to get to it.
 
 How those were measured is worth stating, because the number would mean
-something different otherwise. `t/mutants.py` holds 57 single-edit mutants
+something different otherwise. `t/mutants.py` holds 47 single-edit mutants
 and runs the whole suite against each. Every mutant added while this was
 being built was run individually at the time it was written, against the
-suite as it stood, and the five below are the ones that did not die. A
-single sweep of all 57 in one sitting has not been completed: the suite is
+suite as it stood, and the five below are the ones that did not die.
+
+Two counts in this paragraph said 57 until the table was counted rather
+than recalled. They had been written when the table was that size and never
+revisited as entries were merged, which is the same drift that makes a
+mutation score worth less than it looks: the number is about a table, and a
+table changes. `make test` now runs `t/mutants.py --check`, which asks only
+whether every pattern still appears exactly once in the file it names, and
+goes red on a refactor.
+
+A
+single sweep of all 47 in one sitting has not been completed: the suite is
 three and a half minutes and this machine was running two other
 repositories' sweeps at the same time, which puts one pass over three
 hours. What has been run end to end is the manifest group, reported below.
