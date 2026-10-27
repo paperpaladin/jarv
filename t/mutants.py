@@ -172,6 +172,13 @@ SKIP = "fuzz jdkzip"
 
 def suite(env, skip=None):
     e = dict(env)
+    # The staleness check in t/run.sh asks whether every pattern in this
+    # table still appears in the source. A mutation replaces one of those
+    # patterns, so during a sweep that check is guaranteed to fail, the suite
+    # goes red for that reason alone, and a red suite is read here as the
+    # mutant having been caught. Every mutant would score as killed. extv ran
+    # two forty-minute sweeps that way before the interlock existed.
+    e["JARV_MUTATION_RUN"] = "1"
     if skip:
         e["JARV_SKIP"] = skip
     else:

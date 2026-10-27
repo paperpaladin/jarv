@@ -432,8 +432,14 @@ fi
 # applies to the source. An entry whose pattern has been refactored away is
 # neither killed nor surviving: it does nothing, and the score covers a
 # smaller table than it names.
+# Skipped, loudly and counted, while a mutant is in the tree: a mutation
+# replaces one of the patterns this verifies, so it would fail on every
+# mutant and make every mutant look killed.
 echo "--- the mutation table"
-if mout=$(python3 t/mutants.py --check 2>&1); then
+if [ -n "${JARV_MUTATION_RUN:-}" ]; then
+	pass=$((pass + 1))
+	echo "ok   skipped: a mutation is applied, so a stale pattern is expected"
+elif mout=$(python3 t/mutants.py --check 2>&1); then
 	pass=$((pass + 1)); echo "ok   $mout"
 else
 	fail=$((fail + 1))
