@@ -118,7 +118,7 @@ ok   encoded messages: 30 agree with jarsigner, 0 disagree
 ok   corruption: 64 agree, 0 disagree, 83 both declined,
      28 one declined (11 jarv, 17 jarsigner), 0 crashes
 
-14996 passed, 0 failed
+14997 passed, 0 failed
 ```
 
 The headline is the `jarsigner` line: 955 facts over 26 archives, zero
